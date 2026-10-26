@@ -140,13 +140,23 @@ export type PrBundle = z.infer<typeof PrBundleSchema>;
 // Claims (model I/O)
 // ---------------------------------------------------------------------------
 
+export const ClaimScopeSchema = z.enum(["ci", "local", "unspecified"]);
+export type ClaimScope = z.infer<typeof ClaimScopeSchema>;
+
 export const ClaimSchema = z.object({
-  /** Re-stated claim text (for display), e.g. "Added tests for the login flow". */
+  /** Re-stated claim text, self-contained and understandable without the PR. */
   text: z.string().min(1),
   /** Verbatim quote from the claim's source; checked by the quote guard. */
   quote: z.string(),
   source: ClaimSourceSchema,
   category: ClaimCategorySchema,
+  /**
+   * What the claim is about, so tests_pass logic can treat "tests pass
+   * locally" differently from "CI is green": `ci` = a statement about CI /
+   * observable PR state; `local` = a statement about runs on the author's
+   * machine; `unspecified` = everything else.
+   */
+  scope: ClaimScopeSchema.default("unspecified"),
 });
 export type Claim = z.infer<typeof ClaimSchema>;
 
@@ -219,6 +229,10 @@ export const ReportTimingsSchema = z.object({
   inputTokens: z.number().int().nonnegative(),
   outputTokens: z.number().int().nonnegative(),
   llmCalls: z.number().int().nonnegative(),
+  /** Model attempts (incl. same-model retries) for the extraction call. */
+  extractAttempts: z.number().int().nonnegative(),
+  /** Sum of model attempts across all claim verifications. */
+  verifyAttempts: z.number().int().nonnegative(),
 });
 export type ReportTimings = z.infer<typeof ReportTimingsSchema>;
 

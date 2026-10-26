@@ -8,6 +8,7 @@
  * This module must stay framework-free: no Next.js imports.
  */
 import { callJson, type TokenUsage } from "./llm";
+import { sanitizePrBody } from "./github";
 import { EXTRACTION_SYSTEM_PROMPT, buildExtractionUserPrompt } from "./prompts";
 import type { Claim, PrBundle } from "./types";
 import { ExtractionResponseSchema } from "./types";
@@ -32,13 +33,15 @@ function normalizeText(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
-/** Where a claim's quote must appear, based on its declared source. */
+/** Where a claim's quote must appear, based on its declared source (sanitized, Bug 4). */
 function sourceTextsFor(bundle: PrBundle, source: Claim["source"]): string[] {
   switch (source) {
     case "title":
       return [bundle.title];
     case "pr_body":
-      return bundle.body !== null ? [bundle.body] : [];
+      // The fetch layer already sanitizes, but apply again so bundles built
+      // any other way (fixtures, tests) get the same treatment.
+      return [sanitizePrBody(bundle.body) ?? ""];
     case "commit":
       return bundle.commits.map((commit) => commit.message);
   }

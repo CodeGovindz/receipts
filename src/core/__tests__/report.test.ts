@@ -11,6 +11,7 @@ function makeClaimResult(verdict: Verdict, overrides: Partial<ClaimResult> = {})
       quote: "claims are numbered",
       source: "pr_body",
       category: "bug_fixed",
+      scope: "unspecified",
     },
     verdict,
     confidence: 0.9,
@@ -82,6 +83,8 @@ function baseInput(results: ClaimResult[], overrides: Partial<BuildReportInput> 
       inputTokens: 12_000,
       outputTokens: 3_400,
       llmCalls: 4,
+      extractAttempts: 1,
+      verifyAttempts: 3,
     },
     ...overrides,
   };

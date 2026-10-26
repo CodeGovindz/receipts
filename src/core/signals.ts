@@ -42,16 +42,103 @@ export interface DependencyChange {
   majorBumps: string[];
 }
 
+/** What a CI check actually does — drives which claims it can confirm or refute. */
+export type CheckKind = "test" | "lint" | "typecheck" | "build" | "deploy" | "bot" | "other";
+
+/**
+ * Classifies a check-run/legacy-status name into a kind by name regex.
+ * Order matters: "test" wins over "build" so "build and test" counts as test;
+ * "bot" wins over "deploy" so "Vercel Agent Review" counts as bot.
+ */
+const KIND_PATTERNS: Array<{ kind: CheckKind; pattern: RegExp }> = [
+  {
+    kind: "test",
+    pattern: /\b(tests?|testing|spec|jest|vitest|pytest|mocha|e2e|unit|integration|playwright|cypress|ctest)\b/i,
+  },
+  { kind: "lint", pattern: /lint|format|fmt|biome|eslint|prettier|clippy|style|ruff/i },
+  { kind: "typecheck", pattern: /type.?check|tsc\b|mypy|pyright/i },
+  { kind: "build", pattern: /\bbuild|compile/i },
+  {
+    kind: "bot",
+    pattern:
+      /greptile|coderabbit|socket|security|review|trust|label|scope|plan|detect|codecov|sonar|agent|bot\b|copilot|greptile/i,
+  },
+  { kind: "deploy", pattern: /vercel|netlify|deploy|preview|pages|render|railway|fly\.io|heroku/i },
+];
+
+export function classifyCheckName(name: string): CheckKind {
+  for (const { kind, pattern } of KIND_PATTERNS) {
+    if (pattern.test(name)) return kind;
+  }
+  return "other";
+}
+
+/**
+ * Which CI kinds a piece of claim text explicitly talks about — e.g. the
+ * claim "Biome format checks pass" hints "lint"; "all tests pass" hints
+ * "test". The guard uses this so a claim is only refuted (or confirmed) by
+ * checks of the kind it actually makes a statement about.
+ */
+export function claimCheckKindHints(text: string): CheckKind[] {
+  return KIND_PATTERNS.filter(({ pattern }) => pattern.test(text)).map(({ kind }) => kind);
+}
+
+/** What one check effectively tells us, after ignoring non-outcomes. */
+export type CheckEffect = "success" | "failure" | "pending" | "ignored";
+
+/** Conclusion/status combinations that neither pass nor fail (Bug 3 treatment). */
+const IGNORABLE_CONCLUSIONS = new Set(["skipped", "neutral", "stale"]);
+const FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "startup_failure", "action_required"]);
+const PENDING_STATUSES = new Set(["queued", "in_progress"]);
+
+export function effectiveCheckEffect(status: string, conclusion: string | null): CheckEffect {
+  if (conclusion !== null) {
+    if (IGNORABLE_CONCLUSIONS.has(conclusion)) return "ignored";
+    if (conclusion === "success") return "success";
+    if (FAILURE_CONCLUSIONS.has(conclusion)) return "failure";
+  }
+  if (PENDING_STATUSES.has(status)) return "pending";
+  if (conclusion === null && (status === "completed" || status === "")) return "ignored";
+  return "pending";
+}
+
+/** One CI observation (check run or legacy status) as the verify prompt and guard see it. */
+export interface CiObservation {
+  name: string;
+  status: string;
+  /** Raw GitHub conclusion (check runs) or state (legacy statuses); may be null. */
+  conclusion: string | null;
+  htmlUrl: string;
+  kind: CheckKind;
+  effective: CheckEffect;
+}
+
 export interface CiSignal {
-  /** True when the head SHA has neither check runs nor legacy statuses. */
+  /** True when nothing CI-shaped exists at the head SHA, or every check was skipped/neutral (nothing executed). */
   none: boolean;
   /** Outcome roll-up: "none" | "pending" | "success" | "failure". */
   outcome: "none" | "pending" | "success" | "failure";
   pending: boolean;
-  checkRuns: Array<{ name: string; status: string; conclusion: string | null; htmlUrl: string }>;
-  /** Legacy combined status: success | failure | pending | error | null. */
+  /** Check runs + legacy statuses, each classified by kind and effective outcome. */
+  checkRuns: CiObservation[];
+  /** Legacy combined state: success | failure | pending | error | null. */
   combinedState: string | null;
 }
+
+/** Outcome for one kind of CI check: failure > pending > success > none. */
+export function ciKindOutcome(
+  ci: Pick<CiSignal, "checkRuns">,
+  kind: CheckKind,
+): "failure" | "pending" | "success" | "none" {
+  const runs = ci.checkRuns.filter((run) => run.kind === kind);
+  if (runs.length === 0) return "none";
+  const effects = runs.map((run) => run.effective);
+  if (effects.includes("failure")) return "failure";
+  if (effects.includes("pending")) return "pending";
+  if (effects.includes("success")) return "success";
+  return "none"; // every run of this kind was skipped/neutral
+}
+
 
 export interface TestFilesSignal {
   count: number;
@@ -364,46 +451,69 @@ function computeDependencyChanges(bundle: PrBundle): DependencyChange[] {
 // CI signal
 // ---------------------------------------------------------------------------
 
-function computeCiSignal(bundle: PrBundle): CiSignal {
-  const pendingStatuses = new Set(["queued", "in_progress"]);
-  const failedConclusions = new Set(["failure", "timed_out", "cancelled"]);
-  const failedStates = new Set(["failure", "error"]);
-
-  const checkRuns = bundle.checkRuns.map((run) => ({
+/**
+ * Computes the CI signal: every check run and legacy status gets a kind
+ * (test/lint/typecheck/build/deploy/bot/other) and an effective outcome,
+ * with skipped/neutral/stale treated as ignorable (Bug 3): they neither
+ * pass nor fail. Overall outcome: failure > pending > success; "none"
+ * covers both "no CI at all" and "nothing actually executed".
+ */
+export function computeCiSignal(bundle: PrBundle): CiSignal {
+  const observations: CiObservation[] = bundle.checkRuns.map((run) => ({
     name: run.name,
     status: run.status,
     conclusion: run.conclusion ?? null,
     htmlUrl: run.htmlUrl,
+    kind: classifyCheckName(run.name),
+    effective: effectiveCheckEffect(run.status, run.conclusion ?? null),
   }));
-  const statuses = bundle.combinedStatus?.statuses ?? [];
-  const none = checkRuns.length === 0 && statuses.length === 0;
+  for (const status of bundle.combinedStatus?.statuses ?? []) {
+    observations.push({
+      name: status.context,
+      // Legacy statuses have no separate status/conclusion pair; classify
+      // directly from the state.
+      status: legacyStateToStatusField(status.state),
+      conclusion: status.state,
+      htmlUrl: status.targetUrl ?? bundle.prUrl,
+      kind: classifyCheckName(status.context),
+      effective: legacyStateEffect(status.state),
+    });
+  }
+
   const combinedState = bundle.combinedStatus?.state ?? null;
-  const anyStatusPending =
-    (bundle.combinedStatus?.statuses.some((status) => status.state === "pending") ?? false) ||
-    combinedState === "pending";
-  const pending = checkRuns.some((run) => pendingStatuses.has(run.status)) || anyStatusPending;
-  const anyFailed =
-    checkRuns.some((run) => run.conclusion !== null && failedConclusions.has(run.conclusion)) ||
-    statuses.some((status) => failedStates.has(status.state));
-  const allPassed =
-    checkRuns.length > 0 &&
-    checkRuns.every((run) => (run.status === "completed" ? run.conclusion === "success" : false)) &&
-    [...statuses].every((status) => status.state === "success");
+  const executed = observations.filter((observed) => observed.effective !== "ignored");
+  const none = observations.length === 0 || executed.length === 0;
+  const pending = executed.some((observed) => observed.effective === "pending");
+  const anyFailed = executed.some((observed) => observed.effective === "failure");
+  const anySuccess = executed.some((observed) => observed.effective === "success");
 
   let outcome: CiSignal["outcome"];
   if (none) outcome = "none";
   else if (anyFailed) outcome = "failure";
   else if (pending) outcome = "pending";
-  else if (allPassed) outcome = "success";
+  else if (anySuccess) outcome = "success";
   else outcome = "pending";
 
   return {
     none,
     outcome,
     pending,
-    checkRuns,
+    checkRuns: observations,
     combinedState,
   };
+}
+
+/** Legacy combined-status state -> effective outcome. */
+function legacyStateEffect(state: string): CheckEffect {
+  if (state === "success") return "success";
+  if (state === "failure" || state === "error") return "failure";
+  if (state === "pending") return "pending";
+  return "ignored";
+}
+
+/** Legacy combined-status state -> the status field the CI API vocabulary would use. */
+function legacyStateToStatusField(state: string): string {
+  return state === "pending" ? "pending" : "completed";
 }
 
 // ---------------------------------------------------------------------------
@@ -432,6 +542,17 @@ export function computeSignals(bundle: PrBundle): Signals {
 
 const MAX_LIST = 3;
 
+/** Distinct failing check names (max 3) with their kind, e.g. "Format (Biome) [lint]". */
+function distinctKindNames(
+  ci: Pick<CiSignal, "checkRuns">,
+  effect: CheckEffect,
+): string[] {
+  return ci.checkRuns
+    .filter((run) => run.effective === effect)
+    .map((run) => `${run.name} [${run.kind}]`)
+    .slice(0, MAX_LIST);
+}
+
 /** Human-readable summary lines for the report (one per non-empty signal + CI). */
 export function buildSignalsSummary(signals: Signals): string[] {
   const lines: string[] = [];
@@ -450,18 +571,39 @@ export function buildSignalsSummary(signals: Signals): string[] {
     );
   }
   switch (ci.outcome) {
-    case "none":
-      lines.push("No CI checks reported for head SHA");
+    case "none": {
+      const ignored = ci.checkRuns.filter((run) => run.effective === "ignored").length;
+      lines.push(
+        ignored > 0
+          ? `No CI checks executed for head SHA (all ${ignored} check(s) skipped/neutral)`
+          : "No CI checks reported for head SHA",
+      );
       break;
-    case "pending":
-      lines.push(`CI still running (${ci.checkRuns.length} check run(s) for head SHA)`);
+    }
+    case "pending": {
+      const pendingCount = ci.checkRuns.filter((run) => run.effective === "pending").length;
+      const failing = distinctKindNames(ci, "failure");
+      lines.push(
+        `CI still running (${pendingCount} check(s) pending)` +
+          (failing.length > 0 ? `; failing: ${failing.join(", ")}` : ""),
+      );
       break;
-    case "failure":
-      lines.push("CI failing for head SHA (at least one check run failed)");
+    }
+    case "failure": {
+      lines.push(`CI failing for head SHA (failed: ${distinctKindNames(ci, "failure").join(", ")})`);
       break;
-    case "success":
-      lines.push(`CI passing (${ci.checkRuns.length} check run(s) succeeded)`);
+    }
+    case "success": {
+      const succeeded = ci.checkRuns.filter((run) => run.effective === "success").length;
+      lines.push(`CI passing (${succeeded} check run(s) succeeded)`);
       break;
+    }
+  }
+  const testKindOutcome = ciKindOutcome(ci, "test");
+  if (testKindOutcome === "none" && !ci.none) {
+    lines.push("No CI check runs tests for head SHA");
+  } else if (testKindOutcome === "pending" && ci.outcome !== "pending") {
+    lines.push("Test-type CI checks still running");
   }
   if (signals.removedExports.length > 0) {
     const listed = signals.removedExports

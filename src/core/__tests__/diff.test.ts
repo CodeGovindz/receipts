@@ -16,6 +16,7 @@ function claim(partial: Partial<Claim> & Pick<Claim, "text" | "category">): Clai
   return {
     quote: partial.quote ?? "",
     source: partial.source ?? "pr_body",
+    scope: partial.scope ?? "unspecified",
     ...partial,
   } satisfies Claim;
 }

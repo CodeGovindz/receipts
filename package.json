@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test": "vitest run --passWithNoTests",
     "smoke": "tsx scripts/bedrock-smoke.ts",
-    "verify": "tsx scripts/verify.ts"
+    "verify": "tsx scripts/verify.ts",
+    "eval": "tsx scripts/eval.ts"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.1156.0",

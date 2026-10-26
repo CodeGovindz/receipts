@@ -63,6 +63,12 @@ function makeBundle(overrides: Partial<PrBundle> = {}): PrBundle {
         name: "build",
         status: "completed",
         conclusion: "success",
+        htmlUrl: "https://github.com/acme/widget/runs/9999999",
+      },
+      {
+        name: "Unit tests",
+        status: "completed",
+        conclusion: "success",
         htmlUrl: "https://github.com/acme/widget/runs/1234567",
       },
     ],
@@ -75,7 +81,13 @@ function makeBundle(overrides: Partial<PrBundle> = {}): PrBundle {
 }
 
 function claimOf(partial: Partial<Claim> & Pick<Claim, "text">): Claim {
-  return { quote: partial.quote ?? "", source: "pr_body", category: "bug_fixed", ...partial };
+  return {
+    quote: partial.quote ?? "",
+    source: "pr_body",
+    category: "bug_fixed",
+    scope: partial.scope ?? "unspecified",
+    ...partial,
+  };
 }
 
 function hostileClaim(): Claim {
@@ -120,9 +132,13 @@ describe("citation guard", () => {
       bundle,
       signals,
     );
+    // The model cited the build check; the guard keeps it and adds the
+    // passing test-kind check that actually backs "tests pass".
     expect(guarded.verdict).toBe("VERIFIED");
-    expect(guarded.evidence[0].type).toBe("check_run");
-    expect(guarded.evidence[0].url).toBe("https://github.com/acme/widget/runs/1234567");
+    expect(guarded.evidence.map((item) => item.url)).toEqual([
+      "https://github.com/acme/widget/runs/9999999",
+      "https://github.com/acme/widget/runs/1234567",
+    ]);
   });
 
   it("drops evidence that cites an unknown check run", () => {
@@ -279,14 +295,21 @@ describe("hostile PR fixture (prompt injection)", () => {
       signals,
     );
     expect(guarded.verdict).toBe("VERIFIED");
-    expect(guarded.evidence.map((item) => item.type)).toEqual(["check_run", "file", "signal"]);
+    // Model evidence survives intact; the passing "Unit tests" check is appended.
+    expect(guarded.evidence.map((item) => item.type)).toEqual([
+      "check_run",
+      "file",
+      "signal",
+      "check_run",
+    ]);
+    expect(guarded.evidence[3].checkRunName).toBe("Unit tests");
   });
 
-  it("enforces the CI-pending rule: tests_pass cannot be VERIFIED while CI runs (correction 5)", () => {
+  it("enforces the CI-pending rule: tests_pass cannot be VERIFIED while test CI runs (correction 5)", () => {
     const bundle = makeBundle({
       checkRuns: [
         {
-          name: "build",
+          name: "Unit tests",
           status: "in_progress",
           conclusion: null,
           htmlUrl: "https://github.com/acme/widget/runs/1234567",
@@ -302,13 +325,263 @@ describe("hostile PR fixture (prompt injection)", () => {
         verdict: "VERIFIED",
         confidence: 0.9,
         reasoning: "The build check succeeded.",
-        evidence: [{ type: "check_run", checkRunName: "build" }],
+        evidence: [{ type: "check_run", checkRunName: "Unit tests" }],
       },
       bundle,
       signals,
     );
     expect(guarded.verdict).toBe("UNVERIFIED");
     expect(guarded.reasoning).toContain("CI still running");
+  });
+
+  it("Bug 2: a tests_pass CONTRADICTION must cite a failed check of the kind the claim talks about", () => {
+    // The observed flaky failure: model contradicts "all tests pass" citing
+    // lint (Format (Biome)) and deploy (Vercel) failures. No test-kind check
+    // failed, so the guard downgrades deterministically.
+    const bundle = makeBundle({
+      files: enrichChangedFiles([]),
+      checkRuns: [
+        {
+          name: "Format (Biome)",
+          status: "completed",
+          conclusion: "failure",
+          htmlUrl: "https://github.com/acme/widget/runs/1",
+        },
+        {
+          name: "Rust tests (Linux)",
+          status: "completed",
+          conclusion: "skipped",
+          htmlUrl: "https://github.com/acme/widget/runs/2",
+        },
+      ],
+      combinedStatus: { state: "failure", statuses: [] },
+    });
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({ text: "All 41 SDK tests pass", category: "tests_pass" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.9,
+        reasoning: "Format (Biome) and the Vercel deploy failed.",
+        evidence: [{ type: "check_run", checkRunName: "Format (Biome)" }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+    expect(guarded.reasoning).toContain("No CI check of the kind this claim makes has failed");
+    expect(guarded.reasoning).toContain("lint");
+  });
+
+  it("Bug 2: a CONTRADICTED claim naming a specific kind is refuted by that kind's failure", () => {
+    const bundle = makeBundle({
+      files: enrichChangedFiles([]),
+      checkRuns: [
+        {
+          name: "Format (Biome)",
+          status: "completed",
+          conclusion: "failure",
+          htmlUrl: "https://github.com/acme/widget/runs/1",
+        },
+      ],
+      combinedStatus: null,
+    });
+    const signals = computeSignals(bundle);
+    // A tests_pass-categorized claim that explicitly says Biome format
+    // checks pass IS contradicted by the failed lint check — kept.
+    const guarded = applyGuards(
+      claimOf({ text: "Biome format checks pass", category: "tests_pass" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.9,
+        reasoning: "Format (Biome) failed.",
+        evidence: [{ type: "check_run", checkRunName: "Format (Biome)" }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("CONTRADICTED");
+  });
+
+  it("Bug 2: a tests_pass CONTRADICTED citing a failed test-kind check stands", () => {
+    const bundle = makeBundle({
+      files: enrichChangedFiles([]),
+      checkRuns: [
+        {
+          name: "Integration tests",
+          status: "completed",
+          conclusion: "failure",
+          htmlUrl: "https://github.com/acme/widget/runs/3",
+        },
+        {
+          name: "Unit tests",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/widget/runs/4",
+        },
+      ],
+      combinedStatus: null,
+    });
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({ text: "All tests pass", category: "tests_pass" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.9,
+        reasoning: "The Integration tests job failed.",
+        evidence: [{ type: "check_run", checkRunName: "Integration tests" }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("CONTRADICTED");
+  });
+
+  it("Bug 2: tests_pass VERIFIED is impossible when test-kind checks were skipped in CI", () => {
+    const bundle = makeBundle({
+      files: enrichChangedFiles([]),
+      checkRuns: [
+        {
+          name: "Rust tests (Linux)",
+          status: "completed",
+          conclusion: "skipped",
+          htmlUrl: "https://github.com/acme/widget/runs/2",
+        },
+        {
+          name: "Typecheck",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/widget/runs/5",
+        },
+      ],
+      combinedStatus: null,
+    });
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({ text: "All 41 SDK tests pass", category: "tests_pass" }),
+      {
+        verdict: "VERIFIED",
+        confidence: 0.9,
+        reasoning: "Typecheck succeeded, close enough.",
+        evidence: [{ type: "check_run", checkRunName: "Typecheck" }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+    expect(guarded.reasoning).toContain('CI checks of kind "test" were skipped');
+  });
+
+  it("Bug 2: a local-scope tests_pass claim can never be VERIFIED by CI", () => {
+    const bundle = makeBundle({
+      files: enrichChangedFiles([]),
+      checkRuns: [
+        {
+          name: "Unit tests",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/widget/runs/4",
+        },
+      ],
+      combinedStatus: null,
+    });
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({
+        text: "All 141 tests pass locally",
+        category: "tests_pass",
+        scope: "local",
+      }),
+      {
+        verdict: "VERIFIED",
+        confidence: 0.9,
+        reasoning: "Unit tests succeeded.",
+        evidence: [{ type: "check_run", checkRunName: "Unit tests" }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+    expect(guarded.reasoning).toContain("author's machine");
+  });
+
+  it("Bug 2: tests_pass VERIFIED stands when real test-kind checks all succeeded", () => {
+    const bundle = makeBundle({
+      files: enrichChangedFiles([]),
+      checkRuns: [
+        {
+          name: "Unit tests",
+          status: "completed",
+          conclusion: "success",
+          htmlUrl: "https://github.com/acme/widget/runs/4",
+        },
+      ],
+      combinedStatus: null,
+    });
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({ text: "All tests pass", category: "tests_pass" }),
+      {
+        verdict: "VERIFIED",
+        confidence: 0.9,
+        reasoning: "Unit tests succeeded.",
+        evidence: [{ type: "check_run", checkRunName: "Unit tests" }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("VERIFIED");
+  });
+
+  it("downgrades a low-confidence CONTRADICTED to UNVERIFIED (Bug 5)", () => {
+    const bundle = makeBundle();
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({ text: "No dependencies changed", category: "no_breaking_change" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.6,
+        reasoning: "The diff might remove an export.",
+        evidence: [{ type: "file", path: "src/app.ts", line: 11 }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+    expect(guarded.reasoning).toBe(
+      "Low-confidence contradiction (0.60): The diff might remove an export.",
+    );
+  });
+
+  it("keeps a confident CONTRADICTED (confidence >= 0.75)", () => {
+    const bundle = makeBundle();
+    const signals = computeSignals(bundle);
+    const guarded = applyGuards(
+      claimOf({ text: "No dependencies changed", category: "no_breaking_change" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.8,
+        reasoning: "The hunk removes a public export.",
+        evidence: [{ type: "file", path: "src/app.ts", line: 11 }],
+      },
+      bundle,
+      signals,
+    );
+    expect(guarded.verdict).toBe("CONTRADICTED");
+    expect(guarded.reasoning).not.toContain("Low-confidence");
+    // Exactly 0.75 also stays a contradiction ("< 0.75" downgrades).
+    const boundary = applyGuards(
+      claimOf({ text: "No dependencies changed", category: "no_breaking_change" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.75,
+        reasoning: "The hunk removes a public export.",
+        evidence: [{ type: "file", path: "src/app.ts", line: 11 }],
+      },
+      bundle,
+      signals,
+    );
+    expect(boundary.verdict).toBe("CONTRADICTED");
   });
 });
 

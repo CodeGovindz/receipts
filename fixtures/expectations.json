@@ -1,0 +1,62 @@
+{
+  "$comment": "Regression-eval expectations for the recorded real-PR fixtures (scripts/eval.ts). claimVerdict: every claim whose text contains textIncludes (case-insensitive) must have the verdict; required=true means the claim must exist. noClaimVerdict: no matching claim may have that verdict (empty textIncludes = all claims). contradictedMustCiteKind: every CONTRADICTED claim of the category must cite a check run classified as that kind. These encode the P1 precision review's invariants: pre-fix problem prose must not be contradicted, tests-pass claims are not refuted by non-test CI failures, and no test-kind evidence means UNVERIFIED.",
+  "real-docs-only": {
+    "url": "https://github.com/github/docs/pull/46488",
+    "expectations": [
+      {
+        "$comment": "The typo-fix outcome claim (the section title correction) must be VERIFIED against the diff hunk.",
+        "type": "claimVerdict",
+        "textIncludes": "editing generated files",
+        "verdict": "VERIFIED",
+        "required": true
+      },
+      { "type": "noClaimVerdict", "textIncludes": "", "verdict": "CONTRADICTED" },
+      { "type": "gradeIsNot", "grade": "FAIL" }
+    ]
+  },
+  "real-failing-ci": {
+    "url": "https://github.com/CapSoftware/Cap/pull/3412",
+    "expectations": [
+      {
+        "$comment": "The pre-fix problem statement ('the SDK stays in its recording/paused phase...') must never be judged CONTRADICTED again.",
+        "type": "noClaimVerdict",
+        "textIncludes": "recording/paused phase",
+        "verdict": "CONTRADICTED"
+      },
+      {
+        "$comment": "'All 41 SDK tests pass' must be UNVERIFIED: the only test-kind checks were skipped in CI; the failing checks (Format (Biome), Vercel) are lint/deploy, not tests.",
+        "type": "claimVerdict",
+        "textIncludes": "tests pass",
+        "verdict": "UNVERIFIED",
+        "required": true
+      },
+      {
+        "$comment": "A tests_pass contradiction is legitimate only if it cites a test-kind check.",
+        "type": "contradictedMustCiteKind",
+        "claimCategory": "tests_pass",
+        "kind": "test"
+      },
+      { "type": "gradeIsNot", "grade": "FAIL" }
+    ]
+  },
+  "real-tests-claim-no-tests": {
+    "url": "https://github.com/facebookincubator/dispenso/pull/129",
+    "expectations": [
+      {
+        "$comment": "Nothing in this PR's claims can be contradicted: local test-run claims are UNVERIFIED, not CONTRADICTED.",
+        "type": "noClaimVerdict",
+        "textIncludes": "",
+        "verdict": "CONTRADICTED"
+      },
+      {
+        "$comment": "'ctest -LE flaky: 1287/1287 pass' is a local-machine claim (CI has no matching executed test-kind check) -> UNVERIFIED. Not required: extraction picks up to 12 claims and is not deterministic on Bedrock even at temperature 0.",
+        "type": "claimVerdict",
+        "textIncludes": "1287/1287",
+        "verdict": "UNVERIFIED",
+        "required": false
+      },
+      { "type": "claimVerdict", "textIncludes": "0/60", "verdict": "UNVERIFIED", "required": false },
+      { "type": "gradeIsNot", "grade": "FAIL" }
+    ]
+  }
+}

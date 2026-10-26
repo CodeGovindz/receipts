@@ -4,6 +4,10 @@
  * CLI's stderr log (and P2's NDJSON stream), and keeps the correction-7
  * in-memory report cache keyed by owner/repo#number@headSha + model IDs.
  *
+ * runReceiptsOnBundle() runs everything after the GitHub fetch, so the CLI's
+ * --fixture mode and the eval suite can drive a saved PrBundle without any
+ * network access (the Bedrock models still run live).
+ *
  * This module must stay framework-free: no Next.js imports.
  */
 import { getConfig, type ReceiptsConfig, loadDotEnv } from "./env";
@@ -29,10 +33,19 @@ export interface RunReceiptsOptions {
   onEvent?: (event: PipelineEvent) => void;
   /** Bypass the in-memory report cache (correction 7: `?fresh=1`). */
   fresh?: boolean;
-  /** Override the environment-derived config (tests/CLI). */
+  /** Override the environment-derived config (tests/CLI fixture mode). */
   config?: ReceiptsConfig;
   /** Receives the fetched, enriched bundle (CLI `--dump-fixture`). */
   onBundle?: (bundle: PrBundle) => void;
+}
+
+export interface RunOnBundleOptions {
+  /** No env fallback here: the caller (runReceipts, CLI --fixture, eval) owns the config. */
+  config: ReceiptsConfig;
+  onEvent?: (event: PipelineEvent) => void;
+  fresh?: boolean;
+  /** Time the GitHub fetch took, for honest timings on live runs (default 0). */
+  fetchMs?: number;
 }
 
 // In-memory report cache keyed by owner/repo#number@headSha + model IDs.
@@ -54,32 +67,31 @@ export function clearReportCache(): void {
 }
 
 /**
- * Runs Receipts end-to-end on one public GitHub PR and resolves with the
- * final report. Progress events flow to `onEvent`; failures emit an `error`
- * event and rethrow. On error the pipeline never resolves — callers (CLI,
- * P2 API) surface the failure themselves.
+ * Runs the full pipeline on an already-fetched PrBundle: signals, claim
+ * extraction, verification, guards, report. Used by runReceipts() after the
+ * GitHub fetch and directly by the CLI's --fixture mode and the eval suite.
  */
-export async function runReceipts(prUrl: string, options: RunReceiptsOptions = {}): Promise<Report> {
-  // Entry-point convenience: callers that did not loadDotEnv themselves still
-  // work; loadDotEnv never overrides real environment variables.
-  loadDotEnv();
-  const config = options.config ?? getConfig();
+export async function runReceiptsOnBundle(
+  bundle: PrBundle,
+  options: RunOnBundleOptions,
+): Promise<Report> {
+  const config = options.config;
   const emit = (event: PipelineEvent): void => {
     options.onEvent?.(event);
   };
 
   const started = Date.now();
   try {
-    emit({ type: "fetching" });
-    const fetchStarted = Date.now();
-    const bundle = await fetchPrBundle(prUrl, { githubToken: config.githubToken });
-    const fetchMs = Date.now() - fetchStarted;
-    options.onBundle?.(bundle);
-
     const key = cacheKey(bundle, config);
     if (!options.fresh) {
       const cached = reportCache.get(key);
       if (cached) {
+        emit({
+          type: "fetched",
+          title: bundle.title,
+          filesChanged: bundle.files.length,
+          checkRuns: bundle.checkRuns.length,
+        });
         emit({ type: "done", report: cached });
         return cached;
       }
@@ -109,6 +121,7 @@ export async function runReceipts(prUrl: string, options: RunReceiptsOptions = {
     const verification = await verifyClaims(extraction.claims, bundle, signals, {
       strongModelId: config.modelStrong,
       fallbackModelId: config.modelFallback,
+      concurrency: 4,
       onClaimStart: ({ index, total, claim }) => {
         emit({ type: "verifying", index, total, claim: claim.text });
       },
@@ -128,17 +141,54 @@ export async function runReceipts(prUrl: string, options: RunReceiptsOptions = {
       fallbackModel: config.modelFallback,
       fallbackCount: verification.fallbackCount,
       timings: {
-        fetchMs,
+        fetchMs: options.fetchMs ?? 0,
         extractMs,
         verifyMs,
         totalMs: Date.now() - started,
         inputTokens: extraction.tokens.inputTokens + verification.tokens.inputTokens,
         outputTokens: extraction.tokens.outputTokens + verification.tokens.outputTokens,
         llmCalls: extraction.attempts + verification.attempts,
+        extractAttempts: extraction.attempts,
+        verifyAttempts: verification.attempts,
       },
     });
     reportCache.set(key, report);
     emit({ type: "done", report });
+    return report;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    emit({ type: "error", error: message });
+    throw error;
+  }
+}
+
+/**
+ * Runs Receipts end-to-end on one public GitHub PR and resolves with the
+ * final report. Progress events flow to `onEvent`; failures emit an `error`
+ * event and rethrow. On error the pipeline never resolves — callers (CLI,
+ * P2 API) surface the failure themselves.
+ */
+export async function runReceipts(prUrl: string, options: RunReceiptsOptions = {}): Promise<Report> {
+  // Entry-point convenience: callers that did not loadDotEnv themselves still
+  // work; loadDotEnv never overrides real environment variables.
+  loadDotEnv();
+  const config = options.config ?? getConfig();
+  const emit = (event: PipelineEvent): void => {
+    options.onEvent?.(event);
+  };
+
+  const fetchStarted = Date.now();
+  try {
+    emit({ type: "fetching" });
+    const bundle = await fetchPrBundle(prUrl, { githubToken: config.githubToken });
+    const fetchMs = Date.now() - fetchStarted;
+    options.onBundle?.(bundle);
+    const report = await runReceiptsOnBundle(bundle, {
+      config,
+      onEvent: options.onEvent,
+      fresh: options.fresh,
+      fetchMs,
+    });
     return report;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

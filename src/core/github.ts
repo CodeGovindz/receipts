@@ -117,6 +117,41 @@ type RawCommit = RestEndpointMethodTypes["pulls"]["listCommits"]["response"]["da
 type RawCheckRun = RestEndpointMethodTypes["checks"]["listForRef"]["response"]["data"]["check_runs"][number];
 type RawStatus = RestEndpointMethodTypes["repos"]["getCombinedStatusForRef"]["response"]["data"];
 
+/**
+ * Sanitizes a PR body for use as claim-extraction source text (Bug 4):
+ *
+ * 1. Removes paired bot comment blocks, e.g. Greptile's
+ *    `<!-- greptile_comment --> … <!-- /greptile_comment -->` — AI-reviewer
+ *    output must never leak into claims or the judge's untrusted data.
+ * 2. Removes remaining HTML comments, markdown badge chains, `<picture>`
+ *    blocks and `<img>` tags.
+ * 3. Strips other HTML tags (`<details>`, `<sub>`, anchors) but keeps their
+ *    inner text, then collapses excessive whitespace (line runs and
+ *    trailing spaces per line).
+ *
+ * The quote guard compares against the SANITIZED text, so quotes pulled
+ * from bot comments or image markup can never validate.
+ */
+export function sanitizePrBody(body: string | null): string | null {
+  if (body === null) return null;
+  let text = body;
+  // 1. Paired named comment blocks: <!-- name --> ... <!-- /name -->
+  text = text.replace(/<!--\s*([a-zA-Z0-9_.-]+)\s*-->[\s\S]*?<!--\s*\/\1\s*-->/g, "");
+  // 2a. Any remaining HTML comments (paired or orphaned).
+  text = text.replace(/<!--[\s\S]*?-->/g, "");
+  // 2b. Markdown badges: [![alt](img)](link) and standalone ![alt](img).
+  text = text.replace(/\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)/g, "");
+  text = text.replace(/!\[[^\]]*\]\([^)]*\)/g, "");
+  // 2c. <picture> blocks and <img> tags carry no text worth quoting.
+  text = text.replace(/<picture>[\s\S]*?<\/picture>/gi, "");
+  text = text.replace(/<img\b[^>]*\/?>/gi, "");
+  // 3. Strip remaining HTML tags, keeping inner text.
+  text = text.replace(/<\/?[a-zA-Z][^>]*>/g, "");
+  // 4. Collapse whitespace: trailing spaces per line, 3+ newlines -> 2.
+  text = text.replace(/[ \t]+$/gm, "").replace(/\n{3,}/g, "\n\n");
+  return text.trim();
+}
+
 function createOctokit(githubToken: string | undefined): Octokit {
   return new Octokit({
     ...(githubToken ? { auth: githubToken } : {}),
@@ -256,7 +291,10 @@ export async function fetchPrBundle(
     repo,
     number,
     title: pull.title ?? "",
-    body: pull.body ?? null,
+    // Sanitized at fetch time (Bug 4): bot comment blocks, HTML comments,
+    // badges, and markup are removed before claims are extracted — so
+    // fixtures and the quote guard agree on one canonical body text.
+    body: sanitizePrBody(pull.body ?? null),
     author: pull.user?.login ?? "(unknown)",
     headSha,
     files: enrichChangedFiles(
