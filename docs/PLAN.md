@@ -63,7 +63,7 @@ Overall grade: **FAIL** if any claim is CONTRADICTED; **PASS** if all are VERIFI
 ├─ scripts/
 │  ├─ verify.ts              CLI: npx tsx scripts/verify.ts <pr-url> [--json]
 │  └─ bedrock-smoke.ts       calls all three models once, prints replies + latency ("npm run smoke")
-├─ plugin/receipts/          Alan plugin (Cursor plugin format; see §11)
+├─ .cursor-plugin/marketplace.json + plugins/receipts/   the repo is itself an Alan marketplace (see §11)
 │  ├─ .cursor-plugin/plugin.json
 │  ├─ mcp.json                points to https://<deployment>/api/mcp
 │  └─ skills/receipts-verify/SKILL.md
@@ -191,9 +191,9 @@ PR text is untrusted. Wrap in clear delimiters (`<pr_text>` / `<pr_data>`), tell
 
 Format per `github.com/tryalan-ai/plugins` (README + CONTRIBUTING.md, verified):
 
-- `plugin/receipts/.cursor-plugin/plugin.json` — fields: `name` (`receipts`), `displayName`, `version`, `description`, `author`, `homepage`, `repository`, `license: MIT`, `category`, `keywords`, `"mcpServers": "./mcp.json"`, and `"skills": "./skills/"`.
-- `plugin/receipts/mcp.json` — `{ "mcpServers": { "receipts": { "type": "http", "url": "https://<deployment>/api/mcp" } } }` (remote https only; no credentials needed — server holds AWS/GitHub keys).
-- `plugin/receipts/skills/receipts-verify/SKILL.md` — skill behavior: after opening/updating a PR, call `verify_pr`; on FAIL fix the code or correct the description, re-run until PASS or MIXED with UNVERIFIED items listed; attach the markdown report as a test-evidence artifact / PR comment; before writing a PR description, use `check_claims` to avoid over-claiming. `name` equals the directory; `description` states when to use it.
+- `plugins/receipts/.cursor-plugin/plugin.json` — fields: `name` (`receipts`), `displayName`, `version`, `description`, `author`, `homepage`, `repository`, `license: MIT`, `category`, `keywords`, `"mcpServers": "./mcp.json"`, and `"skills": "./skills/"`.
+- `plugins/receipts/mcp.json` — `{ "mcpServers": { "receipts": { "type": "http", "url": "https://<deployment>/api/mcp" } } }` (remote https only; no credentials needed — server holds AWS/GitHub keys).
+- `plugins/receipts/skills/receipts-verify/SKILL.md` — skill behavior: after opening/updating a PR, call `verify_pr`; on FAIL fix the code or correct the description, re-run until PASS or MIXED with UNVERIFIED items listed; attach the markdown report as a test-evidence artifact / PR comment; before writing a PR description, use `check_claims` to avoid over-claiming. `name` equals the directory; `description` states when to use it.
 - Marketplace: P3 **prepares** the PR to `tryalan-ai/plugins` (adds `plugins/receipts/`, `marketplace.json` entry, `node scripts/validate.mjs`, `node scripts/probe-auth.mjs receipts <url>` expecting `no-auth`) — **but does not open it**; the owner opens it personally.
 - Validate the deployed server early with `@modelcontextprotocol/inspector`.
 
@@ -269,3 +269,5 @@ Fixtures recorded from demo PRs; vitest for `signals`/`guard`/`report` (grading 
 ## 17. Out of scope for MVP
 
 Posting comments from the web app, auth, database/persistence, private repos, GitHub Action (stretch goal only).
+
+**P3 notes:** the repo root is itself an Alan plugin marketplace (`.cursor-plugin/marketplace.json` + `plugins/receipts/`), so an Alan admin can add `CodeGovindz/receipts` under Settings → Plugins → Add marketplace and install Receipts directly; the same folder can be copied into a PR to `tryalan-ai/plugins`. Alan's `scripts/validate.mjs` passes on it. The MCP route is stateless (`WebStandardStreamableHTTPServerTransport`, JSON responses) with tools `verify_pr` and `check_claims`; `check_claims` swaps the PR's text for the agent's draft claims and never writes the report cache.

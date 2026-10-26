@@ -1,0 +1,14 @@
+{
+  "name": "Receipts",
+  "owner": {
+    "name": "Govind Sharma",
+    "url": "https://github.com/CodeGovindz/receipts"
+  },
+  "plugins": [
+    {
+      "name": "receipts",
+      "source": "plugins/receipts",
+      "description": "Check every claim in a pull request against its real diff and CI, and check your own claims before you write them."
+    }
+  ]
+}
