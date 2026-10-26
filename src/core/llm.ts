@@ -69,9 +69,11 @@ export class ModelCallError extends Error {
 let cachedClient: BedrockRuntimeClient | null = null;
 
 /**
- * Shared Bedrock client. Region comes from AWS_REGION; credentials come from
- * the SDK default credential chain (local dev uses the AWS CLI profile,
- * Vercel uses static env keys).
+ * Shared Bedrock client. Region comes from RECEIPTS_AWS_REGION (else
+ * AWS_REGION). Credentials come from RECEIPTS_AWS_ACCESS_KEY_ID /
+ * RECEIPTS_AWS_SECRET_ACCESS_KEY when both are set — Vercel reserves the
+ * plain AWS_* names for its own runtime — and otherwise from the SDK default
+ * credential chain (local dev uses the AWS CLI profile).
  *
  * maxAttempts: 3 keeps transient ThrottlingException / 5xx retries on the
  * SAME model, per plan correction 1 — so any such error that still reaches
@@ -79,12 +81,26 @@ let cachedClient: BedrockRuntimeClient | null = null;
  */
 export function getBedrockClient(): BedrockRuntimeClient {
   if (!cachedClient) {
+    const accessKeyId = process.env.RECEIPTS_AWS_ACCESS_KEY_ID?.trim();
+    const secretAccessKey = process.env.RECEIPTS_AWS_SECRET_ACCESS_KEY?.trim();
     cachedClient = new BedrockRuntimeClient({
-      region: requiredEnv("AWS_REGION", "Set AWS_REGION (e.g. us-east-1) — see .env.example."),
+      region: awsRegion(),
       maxAttempts: 3,
+      ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
     });
   }
   return cachedClient;
+}
+
+/** RECEIPTS_AWS_REGION, else AWS_REGION; throws a clear error when neither is set. */
+export function awsRegion(): string {
+  const region = process.env.RECEIPTS_AWS_REGION?.trim() || process.env.AWS_REGION?.trim();
+  if (!region) {
+    throw new Error(
+      "Missing required environment variable RECEIPTS_AWS_REGION (or AWS_REGION). Set it to e.g. us-east-1 — see .env.example.",
+    );
+  }
+  return region;
 }
 
 /** Test hook: drop the cached client so a new one picks up env changes. */
@@ -101,13 +117,6 @@ export function setBedrockClientForTesting(client: BedrockRuntimeClient | null):
   cachedClient = client;
 }
 
-function requiredEnv(name: string, hint: string): string {
-  const raw = process.env[name];
-  if (!raw || raw.trim() === "") {
-    throw new Error(`Missing required environment variable ${name}. ${hint}`);
-  }
-  return raw.trim();
-}
 
 /**
  * Step 1 of the parse pipeline: read ONLY content blocks that carry a "text"

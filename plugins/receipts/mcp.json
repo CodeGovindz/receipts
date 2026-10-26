@@ -2,7 +2,7 @@
   "mcpServers": {
     "receipts": {
       "type": "http",
-      "url": "https://DEPLOYMENT-HOST/api/mcp"
+      "url": "https://pr-receipts.vercel.app/api/mcp"
     }
   }
 }

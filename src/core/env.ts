@@ -67,10 +67,9 @@ function requiredEnv(name: string, hint: string): string {
  * unusable.
  */
 export function getConfig(): ReceiptsConfig {
-  const region = requiredEnv(
-    "AWS_REGION",
-    "Set AWS_REGION (e.g. us-east-1) — see .env.example.",
-  );
+  const region =
+    process.env.RECEIPTS_AWS_REGION?.trim() ||
+    requiredEnv("AWS_REGION", "Set RECEIPTS_AWS_REGION or AWS_REGION (e.g. us-east-1) — see .env.example.");
   const modelFast = requiredEnv(
     "RECEIPTS_MODEL_FAST",
     "Set the FAST model ID for claim extraction — see .env.example.",
