@@ -1,0 +1,258 @@
+{
+  "prUrl": "https://github.com/CapSoftware/Cap/pull/3412",
+  "owner": "CapSoftware",
+  "repo": "Cap",
+  "number": 3412,
+  "title": "fix(sdk-recorder): release capture after encoder failures",
+  "body": "When a browser encoder raises `MediaRecorder.error`, the SDK stays in its recording/paused phase, retains the camera and microphone, and keeps its timers alive. If the failure happens while stopping, it can also upload the failed encoder's partial output.\n\nHandle errors only for the current encoder, release capture and timers before notifying listeners, and transition to `error` once. Resolve the stop gate with the original error so a pending `stop()` rejects without uploading or creating an unhandled rejection. Late events from a destroyed/replaced encoder cannot affect the replacement. The listener-registration cast is reused for unsubscribe to fix the existing strict-TypeScript error while validating this source; this supporting change is identical to #3380/#3387.\n\nValidation: all 41 SDK tests pass. Six new cases cover active/paused failures, timer cleanup, missing native error details, failure during stop, a late old-encoder error, and replacement from an error handler; five fail before the fix. Full SDK strict typecheck and ESM/declaration build, strict new-test typecheck, scoped Biome and diff checks pass.\n\nReproduce: `bun test packages/sdk-recorder`, then `cd packages/sdk-recorder && bun run typecheck && bun run build`.\n\nThis handles capture-time encoding errors; #3380 handles asynchronous upload ownership. Their combined 49-test suite and package typecheck also pass locally after combining their overlapping stop-gate changes. Browser media devices/events are controlled in tests; physical capture and codec failures were not exercised. No dependencies or public signatures change.\n\n<!-- greptile_comment -->\n\n<!-- greptile_summary -->\n\n<h2><a href=\"https://app.greptile.com/api/retrigger?id=88301148\"><picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"https://greptile-static-assets.s3.amazonaws.com/badges/RetriggerDark.svg?v=2\"><source media=\"(prefers-color-scheme: light)\" srcset=\"https://greptile-static-assets.s3.amazonaws.com/badges/Retrigger.svg?v=2\"><img alt=\"Retrigger\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/Retrigger.svg?v=2\" align=\"right\"></picture></a><a href=\"https://app.greptile.com/cap/github/capsoftware/cap--687f7ffa-f7f8-4351-9af0-9d0b5e77c46e/-/pull/3412\"><picture><source media=\"(prefers-color-scheme: dark)\" srcset=\"https://greptile-static-assets.s3.amazonaws.com/badges/ViewInGreptileDark.svg?v=2\"><source media=\"(prefers-color-scheme: light)\" srcset=\"https://greptile-static-assets.s3.amazonaws.com/badges/ViewInGreptile.svg?v=2\"><img alt=\"View in Greptile\" src=\"https://greptile-static-assets.s3.amazonaws.com/badges/ViewInGreptile.svg?v=2\" align=\"right\"></picture></a>Confidence Score: 5/5</h2>\n\n<!-- greptile-impact-verdict --> The PR appears safe to merge.\n\n<h3>Summary</h3>\n\nThe SDK now releases capture and timers when the current encoder fails.\n- Encoder failures release capture and make a waiting stop reject.\n- Listener unsubscribe keeps its existing behavior.\n\nvedanth-jadhav explicitly assigns asynchronous upload ownership to #3380.\n\n<!-- greptile_confidence_score:5 -->\n\n<sub>Reviews (1) · Last reviewed commit: [\"fix(sdk-recorder): release capture after...\"](https://github.com/capsoftware/cap/commit/92cc9220a77f97d784a6a711facda0ee8c53e3e4) · [Reviewed by Greptile](https://www.greptile.com/?utm_source=greptile_review&utm_medium=github&utm_campaign=review_public&utm_content=capsoftware/cap)</sub>\n\n<!-- /greptile_comment -->",
+  "author": "vedanth-jadhav",
+  "headSha": "92cc9220a77f97d784a6a711facda0ee8c53e3e4",
+  "files": [
+    {
+      "path": "packages/sdk-recorder/__tests__/encoding-errors.test.ts",
+      "previousPath": null,
+      "status": "added",
+      "additions": 205,
+      "deletions": 0,
+      "patch": "@@ -0,0 +1,205 @@\n+import { afterEach, beforeEach, expect, mock, spyOn, test } from \"bun:test\";\n+import { CapRecorder } from \"../src/index\";\n+\n+class Track {\n+\treadyState = \"live\";\n+\tonended: (() => void) | null = null;\n+\tconstructor(readonly kind: \"video\" | \"audio\") {}\n+\tstop() {\n+\t\tthis.readyState = \"ended\";\n+\t}\n+}\n+\n+class Stream {\n+\tconstructor(private readonly tracks: Track[]) {}\n+\tgetTracks() {\n+\t\treturn this.tracks;\n+\t}\n+\tgetVideoTracks() {\n+\t\treturn this.tracks.filter((track) => track.kind === \"video\");\n+\t}\n+\tgetAudioTracks() {\n+\t\treturn this.tracks.filter((track) => track.kind === \"audio\");\n+\t}\n+}\n+\n+class Encoder {\n+\tstatic latest: Encoder;\n+\tstate: RecordingState = \"inactive\";\n+\tonerror: ((event: Event) => void) | null = null;\n+\tondataavailable: ((event: { data: Blob }) => void) | null = null;\n+\tonstop: (() => void) | null = null;\n+\tconstructor() {\n+\t\tEncoder.latest = this;\n+\t}\n+\tstatic isTypeSupported() {\n+\t\treturn true;\n+\t}\n+\tstart() {\n+\t\tthis.state = \"recording\";\n+\t\tthis.ondataavailable?.({ data: new Blob([\"partial bytes\"]) });\n+\t}\n+\tpause() {\n+\t\tthis.state = \"paused\";\n+\t}\n+\tstop() {\n+\t\tthis.state = \"inactive\";\n+\t}\n+\tfail(error?: Error) {\n+\t\tthis.state = \"inactive\";\n+\t\tconst event = new Event(\"error\");\n+\t\tif (error) Object.defineProperty(event, \"error\", { value: error });\n+\t\tthis.onerror?.(event);\n+\t\tthis.ondataavailable?.({ data: new Blob([\"final partial bytes\"]) });\n+\t\tthis.onstop?.();\n+\t}\n+}\n+\n+const descriptors = [\"navigator\", \"MediaStream\", \"MediaRecorder\", \"fetch\"].map(\n+\t(name) => [name, Object.getOwnPropertyDescriptor(globalThis, name)] as const,\n+);\n+let tracks: Track[];\n+const requests = mock(async () => {\n+\tthrow new Error(\"An encoder failure must not upload partial recordings\");\n+});\n+\n+beforeEach(() => {\n+\ttracks = [new Track(\"video\"), new Track(\"audio\")];\n+\trequests.mockClear();\n+\tfor (const [name, value] of Object.entries({\n+\t\tMediaStream: Stream,\n+\t\tMediaRecorder: Encoder,\n+\t\tnavigator: {\n+\t\t\tmediaDevices: {\n+\t\t\t\tgetUserMedia: async (constraints: MediaStreamConstraints) =>\n+\t\t\t\t\tnew Stream(\n+\t\t\t\t\t\ttracks.filter(\n+\t\t\t\t\t\t\t(track) => track.kind === (constraints.video ? \"video\" : \"audio\"),\n+\t\t\t\t\t\t),\n+\t\t\t\t\t),\n+\t\t\t},\n+\t\t},\n+\t\tfetch: requests,\n+\t})) {\n+\t\tObject.defineProperty(globalThis, name, { configurable: true, value });\n+\t}\n+});\n+\n+afterEach(() => {\n+\tmock.restore();\n+\tfor (const [name, descriptor] of descriptors) {\n+\t\tif (descriptor) Object.defineProperty(globalThis, name, descriptor);\n+\t\telse Reflect.deleteProperty(globalThis, name);\n+\t}\n+});\n+\n+test.each([\"recording\", \"paused\"] as const)(\n+\t\"an encoder error releases capture and timers while %s\",\n+\tasync (phase) => {\n+\t\tconst intervals = spyOn(globalThis, \"setInterval\");\n+\t\tconst timeouts = spyOn(globalThis, \"setTimeout\");\n+\t\tconst clearIntervalSpy = spyOn(globalThis, \"clearInterval\");\n+\t\tconst clearTimeoutSpy = spyOn(globalThis, \"clearTimeout\");\n+\t\tconst recorder = new CapRecorder({ publicKey: \"fixture\", mode: \"camera\" });\n+\t\tconst errors: Error[] = [];\n+\t\trecorder.on(\"error\", ({ error }) => errors.push(error));\n+\t\tconst failure = new DOMException(\n+\t\t\t\"Encoder ran out of memory\",\n+\t\t\t\"UnknownError\",\n+\t\t);\n+\t\ttry {\n+\t\t\tawait recorder.start();\n+\t\t\tconst interval = intervals.mock.results.at(-1)?.value;\n+\t\t\tconst timeout = timeouts.mock.results.at(-1)?.value;\n+\t\t\tif (phase === \"paused\") recorder.pause();\n+\t\t\tEncoder.latest.fail(failure);\n+\t\t\texpect(recorder.phase).toBe(\"error\");\n+\t\t\texpect(errors).toEqual([failure]);\n+\t\t\texpect(tracks.map((track) => track.readyState)).toEqual([\n+\t\t\t\t\"ended\",\n+\t\t\t\t\"ended\",\n+\t\t\t]);\n+\t\t\texpect(clearIntervalSpy).toHaveBeenCalledWith(interval);\n+\t\t\texpect(clearTimeoutSpy).toHaveBeenCalledWith(timeout);\n+\t\t\texpect(requests).not.toHaveBeenCalled();\n+\t\t} finally {\n+\t\t\trecorder.destroy();\n+\t\t}\n+\t},\n+);\n+\n+test(\"an encoder error without a native error still reports failure\", async () => {\n+\tconst recorder = new CapRecorder({ publicKey: \"fixture\", mode: \"camera\" });\n+\tconst errors: Error[] = [];\n+\trecorder.on(\"error\", ({ error }) => errors.push(error));\n+\ttry {\n+\t\tawait recorder.start();\n+\t\tEncoder.latest.fail();\n+\t\texpect(recorder.phase).toBe(\"error\");\n+\t\texpect(errors).toHaveLength(1);\n+\t\texpect(errors[0]?.message).toBe(\"Recording failed\");\n+\t} finally {\n+\t\trecorder.destroy();\n+\t}\n+});\n+\n+test(\"an encoder failure during stop rejects with the original error without uploading\", async () => {\n+\tconst recorder = new CapRecorder({ publicKey: \"fixture\", mode: \"camera\" });\n+\tconst errors: Error[] = [];\n+\trecorder.on(\"error\", ({ error }) => errors.push(error));\n+\ttry {\n+\t\tawait recorder.start();\n+\t\tconst stopping = recorder.stop().catch((error: unknown) => error);\n+\t\tconst failure = new DOMException(\n+\t\t\t\"Encoder failed to finish\",\n+\t\t\t\"UnknownError\",\n+\t\t);\n+\t\tEncoder.latest.fail(failure);\n+\t\texpect(await stopping).toBe(failure);\n+\t\texpect(errors).toEqual([failure]);\n+\t\texpect(recorder.phase).toBe(\"error\");\n+\t\texpect(requests).not.toHaveBeenCalled();\n+\t} finally {\n+\t\trecorder.destroy();\n+\t}\n+});\n+\n+test.each([\"destroy\", \"error handler\"] as const)(\n+\t\"late encoder errors cannot affect a replacement started after %s\",\n+\tasync (replacementTrigger) => {\n+\t\tconst recorder = new CapRecorder({ publicKey: \"fixture\", mode: \"camera\" });\n+\t\tconst errors: Error[] = [];\n+\t\tlet replacement: Promise<void> | undefined;\n+\t\trecorder.on(\"error\", ({ error }) => {\n+\t\t\terrors.push(error);\n+\t\t\tif (replacementTrigger === \"error handler\") {\n+\t\t\t\trecorder.destroy();\n+\t\t\t\treplacement = recorder.start();\n+\t\t\t}\n+\t\t});\n+\t\ttry {\n+\t\t\tawait recorder.start();\n+\t\t\tconst oldEncoder = Encoder.latest;\n+\t\t\tconst oldTracks = tracks;\n+\t\t\ttracks = [new Track(\"video\"), new Track(\"audio\")];\n+\t\t\tif (replacementTrigger === \"destroy\") {\n+\t\t\t\trecorder.destroy();\n+\t\t\t\treplacement = recorder.start();\n+\t\t\t} else {\n+\t\t\t\toldEncoder.fail(new Error(\"Original encoder failed\"));\n+\t\t\t\texpect(errors).toHaveLength(1);\n+\t\t\t}\n+\t\t\tawait replacement;\n+\t\t\texpect(oldTracks.every((track) => track.readyState === \"ended\")).toBe(\n+\t\t\t\ttrue,\n+\t\t\t);\n+\t\t\toldEncoder.fail(new Error(\"Late encoder failure\"));\n+\t\t\texpect(recorder.phase).toBe(\"recording\");\n+\t\t\texpect(tracks.every((track) => track.readyState === \"live\")).toBe(true);\n+\t\t\texpect(errors).toHaveLength(replacementTrigger === \"destroy\" ? 0 : 1);\n+\t\t\texpect(requests).not.toHaveBeenCalled();\n+\t\t} finally {\n+\t\t\trecorder.destroy();\n+\t\t}\n+\t},\n+);",
+      "hunks": [
+        {
+          "newStart": 1,
+          "newLines": 205
+        }
+      ],
+      "patchTruncated": false,
+      "excluded": false,
+      "isTest": true
+    },
+    {
+      "path": "packages/sdk-recorder/src/index.ts",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 19,
+      "deletions": 6,
+      "patch": "@@ -35,7 +35,7 @@ export class CapRecorder {\n \tprivate _videoId: string | null = null;\n \tprivate _durationMs = 0;\n \tprivate recorder: MediaRecorder | null = null;\n-\tprivate recordingStopped = Promise.resolve();\n+\tprivate recordingStopped: Promise<Error | null> = Promise.resolve(null);\n \tprivate streams: ManagedStreams | null = null;\n \tprivate startup: AbortController | null = null;\n \tprivate chunks: Blob[] = [];\n@@ -84,9 +84,10 @@ export class CapRecorder {\n \t\t\tthis.listeners.set(event, new Set());\n \t\t}\n \t\tconst set = this.listeners.get(event);\n-\t\tif (set) set.add(handler as EventHandler<keyof RecorderEventMap>);\n+\t\tconst registeredHandler = handler as EventHandler<keyof RecorderEventMap>;\n+\t\tif (set) set.add(registeredHandler);\n \t\treturn () => {\n-\t\t\tthis.listeners.get(event)?.delete(handler);\n+\t\t\tthis.listeners.get(event)?.delete(registeredHandler);\n \t\t};\n \t}\n \n@@ -149,8 +150,19 @@ export class CapRecorder {\n \t\t\t\tmimeType: mimeType || undefined,\n \t\t\t});\n \t\t\tthis.recorder = recorder;\n-\t\t\tthis.recordingStopped = new Promise<void>((resolve) => {\n-\t\t\t\trecorder.onstop = () => resolve();\n+\t\t\tthis.recordingStopped = new Promise<Error | null>((resolve) => {\n+\t\t\t\trecorder.onstop = () => resolve(null);\n+\t\t\t\trecorder.onerror = (event) => {\n+\t\t\t\t\tif (this.recorder !== recorder) return;\n+\t\t\t\t\tconst error =\n+\t\t\t\t\t\t\"error\" in event && event.error instanceof Error\n+\t\t\t\t\t\t\t? event.error\n+\t\t\t\t\t\t\t: new Error(\"Recording failed\");\n+\t\t\t\t\tresolve(error);\n+\t\t\t\t\tthis.cleanup();\n+\t\t\t\t\tthis.setPhase(\"error\");\n+\t\t\t\t\tthis.emit(\"error\", { error });\n+\t\t\t\t};\n \t\t\t});\n \n \t\t\tthis.chunks = [];\n@@ -228,7 +240,8 @@ export class CapRecorder {\n \t\tthis.stopDurationTimer();\n \n \t\tif (recorder.state !== \"inactive\") recorder.stop();\n-\t\tawait stopped;\n+\t\tconst error = await stopped;\n+\t\tif (error) throw error;\n \t\tif (this.recorder !== recorder) {\n \t\t\tthrow new DOMException(\"Recording was canceled\", \"AbortError\");\n \t\t}",
+      "hunks": [
+        {
+          "newStart": 35,
+          "newLines": 7
+        },
+        {
+          "newStart": 84,
+          "newLines": 10
+        },
+        {
+          "newStart": 150,
+          "newLines": 19
+        },
+        {
+          "newStart": 240,
+          "newLines": 8
+        }
+      ],
+      "patchTruncated": false,
+      "excluded": false,
+      "isTest": false
+    }
+  ],
+  "commits": [
+    {
+      "sha": "92cc9220a77f97d784a6a711facda0ee8c53e3e4",
+      "message": "fix(sdk-recorder): release capture after encoder failures"
+    }
+  ],
+  "checkRuns": [
+    {
+      "name": "Rust tests (Linux)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574971"
+    },
+    {
+      "name": "GPUI patch tests (${{ matrix.settings.name }})",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574389"
+    },
+    {
+      "name": "Verify Tauri plugin versions",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574201"
+    },
+    {
+      "name": "Clippy",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753573877"
+    },
+    {
+      "name": "Build GPUI Desktop",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753573825"
+    },
+    {
+      "name": "matrix.platform",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752900251"
+    },
+    {
+      "name": "Deep review label",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752899954"
+    },
+    {
+      "name": "Engine verify",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752897420"
+    },
+    {
+      "name": "Perf budget",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752729176"
+    },
+    {
+      "name": "measure",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752715981"
+    },
+    {
+      "name": "Socket Security: Pull Request Alerts",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752164629"
+    },
+    {
+      "name": "real-capture",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752163261"
+    },
+    {
+      "name": "real-capture (windows-2022)",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752163083"
+    },
+    {
+      "name": "Verify recording",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752161138"
+    },
+    {
+      "name": "Vercel Agent Review",
+      "status": "completed",
+      "conclusion": "neutral",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752116939"
+    },
+    {
+      "name": "Superagent Security Scan",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752093068"
+    },
+    {
+      "name": "Contributor trust",
+      "status": "completed",
+      "conclusion": "neutral",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752086725"
+    },
+    {
+      "name": "Socket Security: Project Report",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752040618"
+    },
+    {
+      "name": "Vercel Preview Comments",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752040311"
+    },
+    {
+      "name": "Greptile Review",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752028683"
+    },
+    {
+      "name": "Plan",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752017555"
+    },
+    {
+      "name": "Typecheck",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752017000"
+    },
+    {
+      "name": "Format (Cargo)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016774"
+    },
+    {
+      "name": "Detect Changes",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016655"
+    },
+    {
+      "name": "Lint (Biome)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016636"
+    },
+    {
+      "name": "Format (Biome)",
+      "status": "completed",
+      "conclusion": "failure",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016536"
+    },
+    {
+      "name": "Mobile",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016219"
+    },
+    {
+      "name": "Scope",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752012623"
+    },
+    {
+      "name": "scope",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752012479"
+    }
+  ],
+  "combinedStatus": {
+    "state": "failure",
+    "statuses": [
+      {
+        "context": "Vercel – cap-status",
+        "state": "success",
+        "targetUrl": "https://vercel.com/mc-ilroy/cap-status/7JEpFXmFbEWxyxt7bPaZK6VaxZFD"
+      },
+      {
+        "context": "Vercel – cap-web",
+        "state": "failure",
+        "targetUrl": "https://vercel.com/git/authorize?team=Cap%20Software%20Inc&slug=mc-ilroy&teamId=team_vbZRU7UW78rpKKIj4c9PfFAC&type=github&job=%7B%22headInfo%22%3A%7B%22sha%22%3A%2292cc9220a77f97d784a6a711facda0ee8c53e3e4%22%7D%2C%22id%22%3A%22QmYD5yvL6jWwdRGE7p9Wa6hhuKz4FvTWPPRBebrgkY5UtK%22%2C%22org%22%3A%22CapSoftware%22%2C%22prId%22%3A3412%2C%22repo%22%3A%22Cap%22%7D"
+      }
+    ]
+  },
+  "fetchedAt": "2026-10-26T18:06:00.930Z",
+  "filesTruncated": false,
+  "commitsTruncated": false
+}

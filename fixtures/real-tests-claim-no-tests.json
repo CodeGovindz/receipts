@@ -1,0 +1,339 @@
+{
+  "prUrl": "https://github.com/facebookincubator/dispenso/pull/129",
+  "owner": "facebookincubator",
+  "repo": "dispenso",
+  "number": 129,
+  "title": "Spin on a relaxed load in the stripe steal loop's exit check",
+  "body": "# PR Details\n\n## Description\n\nStack 25/39, on top of #134. Follow-up to the 2026-10-18 cleanup audit.\n\n- Under TSAN, each acquire atomic load locks the atomic's sync object; ~100 workers spinning on `activeStripes.load(acquire)` starved the single `fetch_sub(release)` that retires the last stripe, hanging parallel_for (~20% of runs on 112 cores).\n- New `allStripesRetired()` spins on a relaxed load and performs one acquire load once it reads 0; by read-read coherence that load also reads 0, so it synchronizes with all release decrements as before.\n- Zero-cost in normal builds (one extra load on exit); no TSAN-only `#if` needed, and no sleep/yield backoff introduced.\n\n## Test Plan\n\n- clang TSAN (RelWithDebInfo, -fsanitize=thread), `chunked_for_test --gtest_filter=ChunkedFor.SimpleLoopAuto` one process per run, 60 s timeout. Before: 4/20 hung (plus 2 more within ~20 further tries while capturing backtraces). After: 0/60.\n- Backtrace of a hang (gdb): all 113 threads in runStripeWorker; the main thread blocked in __sanitizer::FutexWait under __tsan_atomic32_fetch_sub (the final activeStripes release decrement) while the others spin on __tsan_atomic32_load(acquire).\n- TSAN ctest -R \"for|Chunked|parallel\": 61/61 pass. GCC C++14 Release full ctest -LE flaky: 1287/1287 pass.\n\nThe regrouped stack was verified locally at every PR boundary (GCC 14 Release build of library, tests, examples and benchmarks; `ctest -LE flaky` all pass) and at its tip under ASAN+UBSAN (C++14) and Clang TSAN (all pass), with Doxygen 1.11.0 warning-free. CI's 4-vCPU pool size can't be reproduced locally; CI covers it.\n\n## Types of changes\n\n- [ ] Docs change\n- [ ] Refactoring\n- [ ] Dependency upgrade\n- [x] Bug fix\n- [ ] New feature\n\n## Stable surface\n\n- [ ] Adds to the stable surface, without changing compatibility or behaviour for existing documented use\n- [ ] Alters or removes something present in the most recent tagged release\n- [ ] Alters or removes something added since that release, and not yet shipped\n\n- [ ] Public API or ABI\n- [ ] Default behaviour\n- [ ] A documented concurrency guarantee — ordering, forward progress, cancellation, lifetime or safety\n\nnone. Internal detail header (detail/par_for_stripe.h); no API/ABI change; the memory-ordering guarantee of the termination check is preserved (acquire still performed before returning).\n\n## Checklist\n\n- [x] My code follows the code style of this project.\n- [x] I have run clang-format.\n- [x] I have updated the documentation, if this change needed it.\n- [x] I have read the **CONTRIBUTING** document.\n- [ ] I have added tests to cover my changes.\n- [x] All new and existing tests passed, including in ASAN and TSAN modes (if available on your platform).\n- [x] If this adds to or alters the stable surface, I have added a release-notes line.\n\n🤖 Generated with [Claude Code](https://claude.com/claude-code)\n",
+  "author": "graphicsMan",
+  "headSha": "ac7480857b8af687024e6bb5b4ecc43791fb091d",
+  "files": [
+    {
+      "path": "CHANGELOG.md",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 1,
+      "deletions": 0,
+      "patch": "@@ -30,6 +30,7 @@ Unreleased\n * On Windows, dispenso headers no longer leave `_AMD64_`/`_X86_`/`_ARM64_`/`_ARM_` defined in user code, and no longer define `_X86_` alongside an existing `_AMD64_` when `<windows.h>` was included first.\n * `graph.h` no longer declares `callFunctor`, `destroyFunctor` and `ExecutorBase` in a global `detail` namespace, which broke compilation of user code that has its own `::detail` names.\n * Language-version checks now use `_MSVC_LANG` on MSVC (via the new `DISPENSO_CPLUSPLUS` macro), so MSVC builds with `/std:c++17` or later get the C++17/C++20 features (std::optional in `AsyncRequest` and pipelines, C++20 concept constraints, `[[deprecated]]` warnings) without needing `/Zc:__cplusplus`.\n+* `parallel_for` with adaptive chunking no longer hangs intermittently under ThreadSanitizer on many-core machines. This was an interaction with the TSAN runtime, where spinning workers starved the final completion update; normal builds were unaffected.\n \n ### Documentation\n * The API reference now includes `dispenso/utils/graph_dot.h` and `graphsToDot`, listed under the Graph topic.",
+      "hunks": [
+        {
+          "newStart": 30,
+          "newLines": 7
+        }
+      ],
+      "patchTruncated": false,
+      "excluded": false,
+      "isTest": false
+    },
+    {
+      "path": "dispenso/detail/par_for_stripe.h",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 20,
+      "deletions": 2,
+      "patch": "@@ -225,6 +225,24 @@ inline bool stripeClaim(\n   return true;\n }\n \n+// Termination check for the steal loop. Spins on a relaxed load and pays for\n+// the acquire only once the count has reached zero: re-reading the same\n+// atomic with acquire then reads that zero (or nothing older), so it\n+// synchronizes with every release decrement exactly as an acquire spin would.\n+// The split matters under ThreadSanitizer, which implements each acquire load\n+// by taking a lock on the atomic's sync object. With ~100 workers spinning on\n+// acquire loads, the final release fetch_sub could wait on that lock\n+// indefinitely, hanging parallel_for. Relaxed loads take no lock. On normal\n+// builds the cost is one extra load on exit.\n+template <typename IntegerT>\n+inline bool allStripesRetired(const StripeState<IntegerT>& state) {\n+  if (state.activeStripes.load(std::memory_order_relaxed) != 0) {\n+    return false;\n+  }\n+  (void)state.activeStripes.load(std::memory_order_acquire);\n+  return true;\n+}\n+\n // Try to find a stripe with work, preferring same-L3 victims. Returns\n // stripe index or -1 if none. Doesn't claim — caller must follow with\n // stripeClaim (which may itself find the stripe exhausted in the race\n@@ -296,7 +314,7 @@ runStripeWorker(StripeState<IntegerT>& state, uint32_t myIdx, UserState& userSta\n   // Own stripe done. Help peers via mask-driven steal scan with last-victim\n   // retry (warms cursor cache line for the second claim in a row).\n   while (true) {\n-    if (state.activeStripes.load(std::memory_order_acquire) == 0) {\n+    if (allStripesRetired(state)) {\n       return;\n     }\n \n@@ -324,7 +342,7 @@ runStripeWorker(StripeState<IntegerT>& state, uint32_t myIdx, UserState& userSta\n \n     // No work found. Either we're done or a peer is mid-claim on the last\n     // stripe(s). Re-check active count and back off briefly.\n-    if (state.activeStripes.load(std::memory_order_acquire) == 0) {\n+    if (allStripesRetired(state)) {\n       return;\n     }\n     for (int i = 0; i < 64; ++i) {",
+      "hunks": [
+        {
+          "newStart": 225,
+          "newLines": 24
+        },
+        {
+          "newStart": 314,
+          "newLines": 7
+        },
+        {
+          "newStart": 342,
+          "newLines": 7
+        }
+      ],
+      "patchTruncated": false,
+      "excluded": false,
+      "isTest": false
+    }
+  ],
+  "commits": [
+    {
+      "sha": "ac7480857b8af687024e6bb5b4ecc43791fb091d",
+      "message": "Spin on a relaxed load in the stripe steal loop's exit check"
+    }
+  ],
+  "checkRuns": [
+    {
+      "name": "CodeQL",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/runs/121753711273"
+    },
+    {
+      "name": "Linux GCC C++14",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617579"
+    },
+    {
+      "name": "Linux x86 (32-bit)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752617463"
+    },
+    {
+      "name": "Linux x86 (32-bit)",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617235"
+    },
+    {
+      "name": "Windows MSVC C++14",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617226"
+    },
+    {
+      "name": "Code Coverage",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617160"
+    },
+    {
+      "name": "Windows MSVC C++20 static",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617082"
+    },
+    {
+      "name": "Linux Clang C++20",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617067"
+    },
+    {
+      "name": "Documentation",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752617045"
+    },
+    {
+      "name": "Linux GCC 16 + libstdc++",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752617031"
+    },
+    {
+      "name": "Linux Clang C++20",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752617011"
+    },
+    {
+      "name": "Documentation",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752617001"
+    },
+    {
+      "name": "Windows MSVC C++20 static",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616999"
+    },
+    {
+      "name": "Linux system concurrentqueue",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616988"
+    },
+    {
+      "name": "Linux aarch64 Clang",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616970"
+    },
+    {
+      "name": "macOS GCC C++14 (ARM64)",
+      "status": "queued",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616949"
+    },
+    {
+      "name": "Linux system concurrentqueue",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616908"
+    },
+    {
+      "name": "Code Coverage",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616899"
+    },
+    {
+      "name": "macOS C++20 static",
+      "status": "queued",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616874"
+    },
+    {
+      "name": "Linux riscv64 (QEMU)",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616872"
+    },
+    {
+      "name": "Thread Sanitizer",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616869"
+    },
+    {
+      "name": "Linux GCC C++14",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616867"
+    },
+    {
+      "name": "Linux armv7 (32-bit, QEMU)",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616862"
+    },
+    {
+      "name": "Linux riscv32 (QEMU)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616843"
+    },
+    {
+      "name": "Windows x86 (32-bit)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616842"
+    },
+    {
+      "name": "Linux Clang trunk (advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616825"
+    },
+    {
+      "name": "Linux riscv64 (QEMU)",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616801"
+    },
+    {
+      "name": "Linux riscv32 (QEMU)",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616792"
+    },
+    {
+      "name": "Thread Sanitizer",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616791"
+    },
+    {
+      "name": "Windows MSVC C++14",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616784"
+    },
+    {
+      "name": "Linux Clang 22 + libc++",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616774"
+    },
+    {
+      "name": "Linux aarch64 GCC",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616743"
+    },
+    {
+      "name": "macOS C++20 static",
+      "status": "queued",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616732"
+    },
+    {
+      "name": "Linux Clang 22 + libc++",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616723"
+    },
+    {
+      "name": "Address Sanitizer",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616699"
+    },
+    {
+      "name": "Linux Clang trunk (advisory)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616687"
+    },
+    {
+      "name": "Address Sanitizer",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616673"
+    },
+    {
+      "name": "Windows x86 (32-bit)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616646"
+    },
+    {
+      "name": "Linux aarch64 GCC",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616632"
+    },
+    {
+      "name": "Linux armv7 (32-bit, QEMU)",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616581"
+    },
+    {
+      "name": "macOS GCC C++14 (ARM64)",
+      "status": "queued",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616508"
+    },
+    {
+      "name": "Linux GCC 16 + libstdc++",
+      "status": "in_progress",
+      "conclusion": null,
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374183109/job/121752616349"
+    },
+    {
+      "name": "Linux aarch64 Clang",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182901/job/121752616199"
+    },
+    {
+      "name": "Analyze (C/C++)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/actions/runs/40374182789/job/121752614589"
+    },
+    {
+      "name": "Meta CLA Check",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/facebookincubator/dispenso/runs/121752598292"
+    }
+  ],
+  "combinedStatus": {
+    "state": "pending",
+    "statuses": []
+  },
+  "fetchedAt": "2026-10-26T18:07:19.438Z",
+  "filesTruncated": false,
+  "commitsTruncated": false
+}

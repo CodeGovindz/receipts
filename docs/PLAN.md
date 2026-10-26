@@ -106,6 +106,25 @@ Other env vars: `AWS_REGION=us-east-1`; `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_K
 - Concurrency limit for verification calls: 4.
 - Record which model produced each `ClaimResult` (`modelUsed`); `Report.modelsUsed` aggregates for the footer, appending e.g. "(2 via gpt-oss-120b)" when fallback fired.
 
+**Discovery for P2 (recorded during P1):** `next.config.ts` sets `cacheComponents: true`. Any page component that reads `searchParams` (the `?pr=` share link on `src/app/page.tsx`) must be wrapped in a `<Suspense>` boundary or `next build` fails — with `cacheComponents`, `searchParams` access must be deferred to a client/suspended piece of the tree.
+
+**P1 real-PR validation (2026-10-26, all < 60 s target):**
+
+| PR | Kind | Grade | Runtime |
+|---|---|---|---|
+| [CapSoftware/Cap#3412](https://github.com/CapSoftware/Cap/pull/3412) | failing CI (Format (Biome), Vercel) + agent-authored claims | **FAIL · trust 67%** (8/12 verified, 2 contradicted) | ~27 s |
+| [facebookincubator/dispenso#129](https://github.com/facebookincubator/dispenso/pull/129) | description claims test results, adds NO test files; CI still running | **MIXED · trust 42%** (5/12 verified) | ~42 s |
+| [github/docs#46488](https://github.com/github/docs/pull/46488) | docs-only typo fix, merged | **MIXED · trust 67%** (2/3 verified) | ~11 s |
+
+Fixtures pinned under `fixtures/real-*.json` (bundle at head SHA). Highlights: "Validation: all 41 SDK tests pass" in the Cap PR was CONTRADICTED by the failing Biome/Vercel checks; dispenso's "1287/1287 pass" claims became UNVERIFIED via the CI-pending rule (correction 5) because many check runs were queued/in-progress at head SHA.
+
+**P1 honest-observations (recorded for future phases):**
+- FAST extraction reliability (qwen3-coder-next): solid on the three recorded runs (12/12/3 claims with verbatim quotes). One observation run (hmcts/pcs-api#3121, unfilled Jira-template body) returned `{"claims":[]}` and missed the single subtle claim ("Minor label change ... to 'Submit application'"). Decision: KEEP qwen as FAST; monitor.
+- Extraction can turn a PR's problem-statement sentence ("the SDK stays in its recording phase...") into a claim about the new behavior; the Cap run judged that sentence CONTRADICTED. Semantically debatable — reviewers should read CONTRADICTED verdicts on description prose carefully.
+- Verdicts on open PRs drift while CI is pending: the dispenso run's trust moved 50%→42% between two runs ~15 min apart as check runs completed. Fixtures pin the bundle snapshot; re-running against a live open PR re-fetches current CI state.
+- A long audit-style PR body (dispenso) hit the 12-claim cap and made the FAST call take ~23 s of the 42 s total — acceptable, but P2's UI should stream progress so the wait is legible.
+- CLI quirk (Windows PowerShell): `npm run verify -- <url> --fresh --dump-fixture x` drops the unknown flags in npm's argument forwarding (the URL still works, and the flag VALUES become positionals!). `npx tsx scripts/verify.ts <url> --json --fresh --dump-fixture x` works everywhere — document it in the README (P4).
+
 ## 6. Signals (deterministic, computed once per PR, no LLM)
 
 - **testFilesChanged:** test files added/modified; count of added test cases (regexes: `it(`, `test(`, `describe(`, `def test_`, `func Test`, `@Test`).

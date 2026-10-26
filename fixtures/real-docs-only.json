@@ -1,0 +1,364 @@
+{
+  "prUrl": "https://github.com/github/docs/pull/46488",
+  "owner": "github",
+  "repo": "docs",
+  "number": 46488,
+  "title": "Fix typo in section title for generated files",
+  "body": "<!--\r\nThank you for contributing to this project! You must fill out the information below before we can review this pull request. By explaining why you're making a change (or linking to an issue) and what changes you've made, we can triage your pull request to the best possible team for review.\r\n-->\r\n\r\n### Why: \r\n\r\nThis PR fixes a typo in the \"Asking GitHub Copilot questions in GitHub\" doc in Github Docs\r\n\r\nCloses https://github.com/github/docs/issues/46486\r\n\r\n<!-- If there's an existing issue for your change, please link to it above.\r\nIf there's _not_ an existing issue, please open one first to make it more likely that this update will be accepted: https://github.com/github/docs/issues/new/choose. -->\r\n\r\n### What's being changed (if available, include any code snippets, screenshots, or gifs):\r\n\r\n\"Viewing **an** editing generated files\" is changed to \"Viewing **and** editing generated files\" (_an_ changed to _and_)\r\n<img width=\"1365\" height=\"595\" alt=\"image\" src=\"https://github.com/user-attachments/assets/ddad4a83-2d64-4f2d-8e8f-9afd4444a594\" />\r\n\r\n\r\n<!-- Let us know what you are changing. Share anything that could provide the most context.\r\nIf you made changes to the `content` directory, a table will populate in a comment below with links to the review and current production articles. -->\r\n\r\n### Check off the following:\r\n\r\n- [x] A subject matter expert (SME) has reviewed the technical accuracy of the content in this PR. In most cases, the author can be the SME. Open source contributions may require an SME review from GitHub staff.\r\n- [x] The changes in this PR meet [the docs fundamentals that are required for all content](http://docs.github.com/en/contributing/writing-for-github-docs/about-githubs-documentation-fundamentals).\r\n- [ ] All CI checks are passing and the changes look good in the review environment.\r\n",
+  "author": "bobsoapwins",
+  "headSha": "f921f81a3a8a5f64127d3c30726304b2f11a6801",
+  "files": [
+    {
+      "path": "content/copilot/how-tos/copilot-on-github/chat-with-copilot/chat-in-github.md",
+      "previousPath": null,
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "patch": "@@ -41,7 +41,7 @@ category:\n {% data reusables.copilot.stop-response-generation %}\n 1. Within a conversation thread, you can ask follow-up questions. {% data variables.product.prodname_copilot_short %} will answer within the context of the conversation.\n \n-### Viewing an editing generated files\n+### Viewing and editing generated files\n \n > [!NOTE]\n > This feature is currently in {% data variables.release-phases.public_preview %} and subject to change.",
+      "hunks": [
+        {
+          "newStart": 41,
+          "newLines": 7
+        }
+      ],
+      "patchTruncated": false,
+      "excluded": false,
+      "isTest": false
+    }
+  ],
+  "commits": [
+    {
+      "sha": "d6bf588f1429e80689073d25c308559c0c8f8adb",
+      "message": "Fix typo in section title for generated files"
+    },
+    {
+      "sha": "82f578b948d90ebdb53e40e17fe0483906a51937",
+      "message": "Merge branch 'main' into patch-1"
+    },
+    {
+      "sha": "f921f81a3a8a5f64127d3c30726304b2f11a6801",
+      "message": "Merge branch 'main' into patch-1"
+    }
+  ],
+  "checkRuns": [
+    {
+      "name": "generate-changelog",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40372734525/job/121747484096"
+    },
+    {
+      "name": "comment-on-pr",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40372734278/job/121747482004"
+    },
+    {
+      "name": "comment",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40372733390/job/121747478590"
+    },
+    {
+      "name": "License compliance check",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/runs/121739132906"
+    },
+    {
+      "name": "merge-queue-restriction",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249302/job/121738825442"
+    },
+    {
+      "name": "Close if invalid repo-sync PR author",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370248743/job/121738785556"
+    },
+    {
+      "name": "reviewers-legal",
+      "status": "completed",
+      "conclusion": "skipped",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249596/job/121738736653"
+    },
+    {
+      "name": "early-access",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738736568"
+    },
+    {
+      "name": "line-endings",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249397/job/121738736340"
+    },
+    {
+      "name": "secret-scanning",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735790"
+    },
+    {
+      "name": "webhooks",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735724"
+    },
+    {
+      "name": "workflows",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735399"
+    },
+    {
+      "name": "github-apps",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735391"
+    },
+    {
+      "name": "archives",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735190"
+    },
+    {
+      "name": "data-directory",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735162"
+    },
+    {
+      "name": "content-linter",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735085"
+    },
+    {
+      "name": "landings",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735065"
+    },
+    {
+      "name": "links",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738735051"
+    },
+    {
+      "name": "versions",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734987"
+    },
+    {
+      "name": "graphql",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734971"
+    },
+    {
+      "name": "events",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734968"
+    },
+    {
+      "name": "observability",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734965"
+    },
+    {
+      "name": "rest",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734948"
+    },
+    {
+      "name": "shielding",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734947"
+    },
+    {
+      "name": "products",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734919"
+    },
+    {
+      "name": "ghes-releases",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734892"
+    },
+    {
+      "name": "release-notes",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734869"
+    },
+    {
+      "name": "journeys",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734853"
+    },
+    {
+      "name": "article-api",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734842"
+    },
+    {
+      "name": "tools",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734841"
+    },
+    {
+      "name": "redirects",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734840"
+    },
+    {
+      "name": "color-schemes",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734832"
+    },
+    {
+      "name": "content-render",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734806"
+    },
+    {
+      "name": "frame",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734758"
+    },
+    {
+      "name": "search",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734717"
+    },
+    {
+      "name": "fixtures",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734699"
+    },
+    {
+      "name": "audit-logs",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734696"
+    },
+    {
+      "name": "automated-pipelines",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734683"
+    },
+    {
+      "name": "eslint-rules",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734582"
+    },
+    {
+      "name": "assets",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249217/job/121738734315"
+    },
+    {
+      "name": "lint-code",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249383/job/121738733645"
+    },
+    {
+      "name": "review-comment",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370248319/job/121738733446"
+    },
+    {
+      "name": "test-changed-content",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249575/job/121738733370"
+    },
+    {
+      "name": "playwright-tests (playwright-rendering)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249206/job/121738733339"
+    },
+    {
+      "name": "playwright-tests (playwright-a11y)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249206/job/121738733215"
+    },
+    {
+      "name": "playwright-tests (playwright-secret-scanning)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249206/job/121738733203"
+    },
+    {
+      "name": "playwright-tests (playwright-header)",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249206/job/121738732914"
+    },
+    {
+      "name": "local-dev",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249299/job/121738732586"
+    },
+    {
+      "name": "Label spammy PRs and reject non-main targets",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370248276/job/121738732374"
+    },
+    {
+      "name": "triage",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370248274/job/121738732307"
+    },
+    {
+      "name": "lint-content",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370249227/job/121738732277"
+    },
+    {
+      "name": "close-without-help-wanted-issue",
+      "status": "completed",
+      "conclusion": "success",
+      "htmlUrl": "https://github.com/github/docs/actions/runs/40370248272/job/121738732054"
+    }
+  ],
+  "combinedStatus": {
+    "state": "pending",
+    "statuses": []
+  },
+  "fetchedAt": "2026-10-26T18:08:07.537Z",
+  "filesTruncated": false,
+  "commitsTruncated": false
+}

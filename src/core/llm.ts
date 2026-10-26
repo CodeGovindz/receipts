@@ -1,10 +1,8 @@
 /**
- * Minimal Amazon Bedrock Converse layer.
- *
- * P0 scope: a shared client plus the 4-step response parser needed by the
- * smoke script. The full callJson<T>() wrapper (zod validation, one
- * same-model retry with the validation error fed back, STRONG->FALLBACK
- * failover) arrives in P1 — see docs/PLAN.md for the exact contract.
+ * Amazon Bedrock Converse layer: shared client, the 4-step response parser,
+ * callJson<T>() (parse + zod validate + one same-model retry with the
+ * validation error fed back), and callStrong<T>() (STRONG -> FALLBACK
+ * failover). Contract details live in docs/PLAN.md §5.
  *
  * This module must stay framework-free: no Next.js imports, so the CLI,
  * the web app, and the MCP server can all share it.
@@ -14,6 +12,7 @@ import {
   ConverseCommand,
   type ConverseCommandOutput,
 } from "@aws-sdk/client-bedrock-runtime";
+import type { z } from "zod";
 
 /** Input for a single Converse call. */
 export interface ConverseCallOptions {
@@ -22,8 +21,9 @@ export interface ConverseCallOptions {
   user: string;
   /** Max output tokens. Reasoning models count reasoning tokens against this. */
   maxTokens?: number;
+  /** Opt-in: Kimi K3 (STRONG) rejects the temperature field outright. */
   temperature?: number;
-  /** Optional wall-clock timeout for this call in milliseconds. */
+  /** Wall-clock timeout for this call in milliseconds. */
   timeoutMs?: number;
 }
 
@@ -36,15 +36,46 @@ export interface ConverseCallResult {
   outputTokens: number;
 }
 
+/**
+ * Thrown when a Converse call is cancelled because it exceeded its wall-clock
+ * timeout. Typed so the fallback logic (callStrong) can distinguish timeouts
+ * from parse failures, which must never switch models.
+ */
+export class TimeoutError extends Error {
+  readonly timedOutAfterMs: number;
+  constructor(message: string, timedOutAfterMs: number) {
+    super(message);
+    this.name = "TimeoutError";
+    this.timedOutAfterMs = timedOutAfterMs;
+  }
+}
+
+/**
+ * Thrown when a model's output cannot be parsed/zod-validated even after the
+ * one same-model retry. Verification degrades the claim to UNVERIFIED
+ * ("model output unparseable"); parse failures never switch models.
+ */
+export class ModelCallError extends Error {
+  readonly modelId: string;
+  readonly detail: string;
+  constructor(message: string, modelId: string, detail: string) {
+    super(message);
+    this.name = "ModelCallError";
+    this.modelId = modelId;
+    this.detail = detail;
+  }
+}
+
 let cachedClient: BedrockRuntimeClient | null = null;
 
 /**
  * Shared Bedrock client. Region comes from AWS_REGION; credentials come from
- * the SDK default credential chain (so local dev uses the AWS CLI profile
- * and Vercel uses the static env keys).
+ * the SDK default credential chain (local dev uses the AWS CLI profile,
+ * Vercel uses static env keys).
  *
  * maxAttempts: 3 keeps transient ThrottlingException / 5xx retries on the
- * SAME model, per plan correction 1 — fallback logic is layered on top in P1.
+ * SAME model, per plan correction 1 — so any such error that still reaches
+ * us has already been retried, and callStrong treats it as a failover signal.
  */
 export function getBedrockClient(): BedrockRuntimeClient {
   if (!cachedClient) {
@@ -54,6 +85,20 @@ export function getBedrockClient(): BedrockRuntimeClient {
     });
   }
   return cachedClient;
+}
+
+/** Test hook: drop the cached client so a new one picks up env changes. */
+export function resetBedrockClient(): void {
+  cachedClient = null;
+}
+
+/**
+ * Test hook: inject a stub BedrockRuntimeClient so callJson/callStrong
+ * (including the failover policy) can be exercised without network access.
+ * Passing null restores the real client lazily.
+ */
+export function setBedrockClientForTesting(client: BedrockRuntimeClient | null): void {
+  cachedClient = client;
 }
 
 function requiredEnv(name: string, hint: string): string {
@@ -96,10 +141,10 @@ export function stripCodeFences(raw: string): string {
 }
 
 /**
- * Step 3/4: JSON.parse the cleaned text; if it still is not pure JSON, extract
+ * Steps 3/4: JSON.parse the cleaned text; if it still is not pure JSON, extract
  * the first balanced top-level {...} or [...] block and parse that instead.
  * Throws if neither yields parseable JSON — callers decide how to degrade
- * (P1: same-model retry, then deterministic fallback verdicts).
+ * (callJson retries once on the same model, then degrades deterministically).
  */
 export function parseModelJson(raw: string): unknown {
   const cleaned = stripCodeFences(raw);
@@ -149,9 +194,11 @@ function firstBalancedBlock(text: string): string | null {
 }
 
 /**
- * One Converse call. P0 uses a simple Promise.race timeout so the smoke
- * script can never hang; P1 replaces this with AbortController so the HTTP
- * request is actually cancelled (recorded in docs/PLAN.md).
+ * One Converse call with real cancellation: the timeout drives an
+ * AbortController wired into the SDK request options, so the in-flight
+ * HTTP request is actually cancelled (replacing P0's Promise.race, which
+ * left the request running). On timeout the caller gets a typed
+ * TimeoutError; every other error propagates untouched.
  */
 export async function converse(options: ConverseCallOptions): Promise<ConverseCallResult> {
   const client = getBedrockClient();
@@ -169,11 +216,28 @@ export async function converse(options: ConverseCallOptions): Promise<ConverseCa
   });
 
   const started = Date.now();
-  const pending = client.send(command);
-  const output =
-    options.timeoutMs === undefined
-      ? await pending
-      : await withTimeoutMs(pending, options.timeoutMs, `${options.modelId} call`);
+  let output: ConverseCommandOutput;
+  if (options.timeoutMs === undefined) {
+    output = await client.send(command);
+  } else {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), options.timeoutMs);
+    try {
+      output = await client.send(command, { abortSignal: controller.signal });
+    } catch (error) {
+      // The SDK rejects in several shapes once the signal fires; the aborted
+      // flag is the reliable discriminator between a timeout and a real error.
+      if (controller.signal.aborted) {
+        throw new TimeoutError(
+          `${options.modelId} call timed out after ${options.timeoutMs}ms`,
+          options.timeoutMs,
+        );
+      }
+      throw error;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
   return {
     modelId: options.modelId,
     text: textBlocksOnly(output),
@@ -183,19 +247,214 @@ export async function converse(options: ConverseCallOptions): Promise<ConverseCa
   };
 }
 
-/** Rejects with a clear timeout error; never leaves a dangling timer. */
-function withTimeoutMs<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
-    promise.then(
-      (value) => {
-        clearTimeout(timer);
-        resolve(value);
+/** Input to callJson(): a single-model JSON call. Model ID is explicit. */
+export interface CallJsonOptions extends Omit<ConverseCallOptions, "modelId"> {
+  modelId: string;
+}
+
+/** Token usage reported per call (summed across same-model attempts). */
+export interface TokenUsage {
+  inputTokens: number;
+  outputTokens: number;
+}
+
+/** Result of a successful callJson / callStrong. */
+export interface CallJsonResult<T> {
+  data: T;
+  /** Bedrock model ID that actually produced the data. */
+  modelUsed: string;
+  latencyMs: number;
+  tokens: TokenUsage;
+  attempts: number;
+}
+
+/** callStrong() result extras: whether the FALLBACK model had to fire. */
+export interface CallStrongResult<T> extends CallJsonResult<T> {
+  fallbackUsed: boolean;
+  /** Why the STRONG call was abandoned, e.g. "timed out after 45000ms". */
+  fallbackReason?: string;
+}
+
+/** Options for callStrong(): STRONG with fallback policy per plan §5. */
+export interface CallStrongOptions {
+  strongModelId: string;
+  fallbackModelId: string;
+  system: string;
+  user: string;
+  maxTokens?: number;
+  strongTimeoutMs?: number;
+  fallbackTimeoutMs?: number;
+  /** Called when the call fails over to FALLBACK (pipeline emits an event). */
+  onFallback?: (info: { from: string; to: string; reason: string }) => void;
+}
+
+/** Plan §5 defaults. */
+export const STRONG_TIMEOUT_MS = 45_000;
+export const FALLBACK_TIMEOUT_MS = 30_000;
+export const STRONG_MAX_TOKENS = 2000;
+
+type ValidationOutcome<T> = { ok: true; data: T } | { ok: false; detail: string };
+
+function validateAgainstSchema<T>(raw: string, schema: z.ZodType<T>): ValidationOutcome<T> {
+  let parsed: unknown;
+  try {
+    parsed = parseModelJson(raw);
+  } catch (error) {
+    return { ok: false, detail: `not valid JSON: ${error instanceof Error ? error.message : String(error)}` };
+  }
+  const result = schema.safeParse(parsed);
+  if (result.success) {
+    return { ok: true, data: result.data };
+  }
+  const details = result.error.issues
+    .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "(root)"}: ${issue.message}`)
+    .join("; ");
+  return { ok: false, detail: `schema validation failed: ${details}` };
+}
+
+/**
+ * Calls one model and validates its JSON output against the zod schema.
+ * On a parse or zod failure the SAME model is retried once with the
+ * validation error fed back (plan §8.3); a timeout or transport error is
+ * never retried here — it propagates immediately so callStrong can fail
+ * over. If the retry also fails validation, throws ModelCallError; the
+ * caller degrades deterministically (extraction -> no claims, verification
+ * -> UNVERIFIED "model output unparseable").
+ */
+export async function callJson<T>(
+  options: CallJsonOptions,
+  schema: z.ZodType<T>,
+): Promise<CallJsonResult<T>> {
+  const started = Date.now();
+  let inputTokens = 0;
+  let outputTokens = 0;
+  // Loop-local: verification runs 4 concurrent calls, so no shared state.
+  let detail = "";
+
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    // First attempt uses the original prompt; the retry appends the zod error.
+    const userMessage = attempt === 1 ? options.user : retryPrompt(options.user, detail);
+    const result = await converse({ ...options, user: userMessage });
+    inputTokens += result.inputTokens;
+    outputTokens += result.outputTokens;
+
+    const outcome = validateAgainstSchema(result.text, schema);
+    if (outcome.ok) {
+      return {
+        data: outcome.data,
+        modelUsed: options.modelId,
+        latencyMs: Date.now() - started,
+        tokens: { inputTokens, outputTokens },
+        attempts: attempt,
+      };
+    }
+    detail = outcome.detail;
+    if (attempt === 2) {
+      throw new ModelCallError(
+        `Model output unparseable after retry (${options.modelId})`,
+        options.modelId,
+        outcome.detail,
+      );
+    }
+  }
+  throw new ModelCallError("unreachable", options.modelId, "loop exhausted");
+}
+
+function retryPrompt(original: string, detail: string): string {
+  return (
+    `${original}\n\nYour previous output failed validation: ${detail}. ` +
+    "Return corrected JSON only."
+  );
+}
+
+/**
+ * True when a conversational model error justifies failing over from STRONG
+ * to FALLBACK (plan correction 1): a typed timeout, or throttling/5xx that
+ * the SDK already retried at least 3 times on the same model. Parse and
+ * zod failures (ModelCallError) are deliberately NOT recoverable — parse
+ * failures never switch models.
+ */
+function isFailoverError(error: unknown): boolean {
+  if (error instanceof TimeoutError) return true;
+  if (error instanceof ModelCallError) return false;
+  if (!(error instanceof Error)) return false;
+  if (error.name.includes("Throttl")) return true;
+  const metadata = (error as { $metadata?: { httpStatusCode?: number } }).$metadata;
+  if (typeof metadata?.httpStatusCode === "number" && metadata.httpStatusCode >= 500) return true;
+  return (
+    error.name === "ServiceUnavailableException" ||
+    error.name === "InternalServerException" ||
+    error.name === "InternalFailureException"
+  );
+}
+
+function failoverReason(error: unknown): string {
+  if (error instanceof TimeoutError) {
+    return `timed out after ${error.timedOutAfterMs}ms`;
+  }
+  if (error instanceof Error) {
+    const metadata = (error as { $metadata?: { httpStatusCode?: number } }).$metadata;
+    const status = metadata?.httpStatusCode;
+    return `error after SDK retries: ${error.name}${status ? ` (HTTP ${status})` : ""}`;
+  }
+  return String(error);
+}
+
+/**
+ * STRONG call with the full fallback policy: 45 s timeout, temperature
+ * omitted (Kimi K3 rejects it); on timeout or throttling/5xx that survived
+ * the SDK's same-model retries, fails over straight to FALLBACK with a 30 s
+ * timeout (no extra same-model attempts for transport errors). If FALLBACK
+ * also fails, the error propagates and the caller degrades the claim to
+ * UNVERIFIED.
+ *
+ * Parse/zod failures from the STRONG model are NOT failed over — they retry
+ * once on the same model inside callJson, then surface as ModelCallError.
+ */
+export async function callStrong<T>(
+  options: CallStrongOptions,
+  schema: z.ZodType<T>,
+): Promise<CallStrongResult<T>> {
+  const started = Date.now();
+  try {
+    const result = await callJson(
+      {
+        modelId: options.strongModelId,
+        system: options.system,
+        user: options.user,
+        maxTokens: options.maxTokens ?? STRONG_MAX_TOKENS,
+        // No temperature: Kimi K3 rejects the field.
+        timeoutMs: options.strongTimeoutMs ?? STRONG_TIMEOUT_MS,
       },
-      (error: unknown) => {
-        clearTimeout(timer);
-        reject(error instanceof Error ? error : new Error(String(error)));
-      },
+      schema,
     );
-  });
+    return { ...result, fallbackUsed: false };
+  } catch (error) {
+    if (!isFailoverError(error)) {
+      throw error;
+    }
+    const reason = failoverReason(error);
+    options.onFallback?.({
+      from: options.strongModelId,
+      to: options.fallbackModelId,
+      reason,
+    });
+    const result = await callJson(
+      {
+        modelId: options.fallbackModelId,
+        system: options.system,
+        user: options.user,
+        maxTokens: 1000,
+        temperature: 0,
+        timeoutMs: options.fallbackTimeoutMs ?? FALLBACK_TIMEOUT_MS,
+      },
+      schema,
+    );
+    return {
+      ...result,
+      latencyMs: Date.now() - started,
+      fallbackUsed: true,
+      fallbackReason: reason,
+    };
+  }
 }
