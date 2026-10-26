@@ -1,0 +1,22 @@
+{
+  "name": "receipts",
+  "displayName": "Receipts",
+  "version": "1.0.0",
+  "description": "Check every claim in a pull request against its real diff and CI, and check your own claims before you write them.",
+  "author": {
+    "name": "Govind Sharma"
+  },
+  "homepage": "https://github.com/CodeGovindz/receipts",
+  "repository": "https://github.com/CodeGovindz/receipts",
+  "license": "MIT",
+  "category": "code-and-ci",
+  "keywords": [
+    "pull-requests",
+    "code-review",
+    "verification",
+    "ci"
+  ],
+  "logo": "assets/logo.png",
+  "mcpServers": "./mcp.json",
+  "skills": "./skills/"
+}

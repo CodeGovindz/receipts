@@ -44,6 +44,8 @@ export interface RunOnBundleOptions {
   config: ReceiptsConfig;
   onEvent?: (event: PipelineEvent) => void;
   fresh?: boolean;
+  /** Store the report in the cache (default true; false for draft checks, whose bundle isn't the real PR). */
+  cache?: boolean;
   /** Time the GitHub fetch took, for honest timings on live runs (default 0). */
   fetchMs?: number;
 }
@@ -152,7 +154,7 @@ export async function runReceiptsOnBundle(
         verifyAttempts: verification.attempts,
       },
     });
-    reportCache.set(key, report);
+    if (options.cache !== false) reportCache.set(key, report);
     emit({ type: "done", report });
     return report;
   } catch (error) {
@@ -195,4 +197,45 @@ export async function runReceipts(prUrl: string, options: RunReceiptsOptions = {
     emit({ type: "error", error: message });
     throw error;
   }
+}
+
+/** Max draft claims check_claims accepts in one call. */
+export const MAX_DRAFT_CLAIMS = 12;
+
+/**
+ * Checks claims an agent is ABOUT to make (e.g. a draft PR description)
+ * against the PR's real diff and CI, before it writes them. The drafts
+ * replace the PR's own title, body and commits as the extraction source, so
+ * the quote guard validates against exactly what the agent submitted.
+ * Never cached: the same head SHA answers different drafts.
+ */
+export async function runClaimCheck(
+  prUrl: string,
+  claims: string[],
+  options: Omit<RunReceiptsOptions, "fresh" | "onBundle"> = {},
+): Promise<Report> {
+  loadDotEnv();
+  const config = options.config ?? getConfig();
+  const drafts = claims.map((claim) => claim.trim()).filter((claim) => claim !== "");
+  if (drafts.length === 0) throw new Error("Provide at least one claim to check.");
+  if (drafts.length > MAX_DRAFT_CLAIMS) {
+    throw new Error(`Check at most ${MAX_DRAFT_CLAIMS} claims per call (got ${drafts.length}).`);
+  }
+
+  const fetchStarted = Date.now();
+  options.onEvent?.({ type: "fetching" });
+  const bundle = await fetchPrBundle(prUrl, { githubToken: config.githubToken });
+  const draftBundle: PrBundle = {
+    ...bundle,
+    title: "",
+    body: drafts.map((claim) => `- ${claim}`).join("\n"),
+    commits: [],
+  };
+  return runReceiptsOnBundle(draftBundle, {
+    config,
+    onEvent: options.onEvent,
+    fresh: true,
+    cache: false,
+    fetchMs: Date.now() - fetchStarted,
+  });
 }
