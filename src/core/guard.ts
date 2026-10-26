@@ -183,17 +183,54 @@ export function applyGuards(
   // Bug 5 — precision guard: a CONTRADICTED verdict is the most damaging thing
   // Receipts can say (it forces a FAIL grade), so a low-confidence
   // contradiction is downgraded to UNVERIFIED rather than risking a false one.
-  if (verdict === "CONTRADICTED" && response.confidence < LOW_CONTRADICTION_CONFIDENCE) {
+  let confidence = response.confidence;
+  if (verdict === "CONTRADICTED" && confidence < LOW_CONTRADICTION_CONFIDENCE) {
     verdict = "UNVERIFIED";
-    reasoning = `Low-confidence contradiction (${response.confidence.toFixed(2)}): ${response.reasoning}`;
+    reasoning = `Low-confidence contradiction (${confidence.toFixed(2)}): ${response.reasoning}`;
+  }
+
+  // Deterministic: "tests were added" is false when the whole diff is
+  // visible and holds neither a test file nor a single added test case.
+  // Runs last so it can't be softened by the model's own uncertainty.
+  if (claim.category === "tests_added" && verdict !== "CONTRADICTED" && noTestsAnywhere(bundle, signals)) {
+    verdict = "CONTRADICTED";
+    confidence = 0.95;
+    reasoning =
+      `None of the ${bundle.files.length} changed file(s) is a test file, and no added line ` +
+      "anywhere in the diff defines a test case.";
+    kept.splice(0, kept.length, {
+      type: "signal",
+      path: null,
+      line: null,
+      checkRunName: null,
+      detail: "testFilesChanged",
+      url: null,
+    });
   }
 
   return {
     verdict,
-    confidence: Math.min(1, Math.max(0, response.confidence)),
+    confidence: Math.min(1, Math.max(0, confidence)),
     reasoning,
     evidence: kept,
   };
+}
+
+/**
+ * True only when every changed file's patch is fully visible (no truncated
+ * file list, no missing or cut-off patches outside excluded files like
+ * lockfiles) and none of it is a test file or adds a test case.
+ */
+function noTestsAnywhere(bundle: PrBundle, signals: Signals): boolean {
+  if (bundle.filesTruncated || bundle.files.length === 0) return false;
+  const fullyVisible = bundle.files.every(
+    (file) => file.excluded || (file.patch !== null && !file.patchTruncated),
+  );
+  return (
+    fullyVisible &&
+    signals.testFilesChanged.count === 0 &&
+    signals.testFilesChanged.addedTestCases === 0
+  );
 }
 
 /** The check kinds a tests_pass claim makes a statement about. */

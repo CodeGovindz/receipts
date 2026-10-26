@@ -658,6 +658,75 @@ describe("signal corner: removedExports vs signatureChanges (correction 4)", () 
   });
 });
 
+describe("tests_added with no tests anywhere in the diff", () => {
+  const modelSaysUnverified = {
+    verdict: "UNVERIFIED" as const,
+    confidence: 0.6,
+    reasoning: "No test files are visible.",
+    evidence: [] as EvidenceItem[],
+  };
+
+  function bundleWithFiles(
+    files: Array<{ path: string; patch: string | null }>,
+    overrides: Partial<PrBundle> = {},
+  ): PrBundle {
+    return makeBundle({
+      files: enrichChangedFiles(
+        files.map((file) => ({
+          path: file.path,
+          previousPath: null,
+          status: "modified",
+          additions: 1,
+          deletions: 1,
+          patch: file.patch,
+        })),
+      ),
+      ...overrides,
+    });
+  }
+
+  it("is CONTRADICTED when the whole diff is visible and has no test file or test case", () => {
+    const bundle = bundleWithFiles([
+      { path: "docs/guide.md", patch: "@@ -1,1 +1,1 @@\n-Viewing an editing\n+Viewing and editing" },
+    ]);
+    const guarded = applyGuards(
+      claimOf({ text: "Adds unit tests for the docs renderer", category: "tests_added" }),
+      modelSaysUnverified,
+      bundle,
+      computeSignals(bundle),
+    );
+    expect(guarded.verdict).toBe("CONTRADICTED");
+    expect(guarded.reasoning).toContain("no added line");
+  });
+
+  it("is left to the model when a Rust test is added inside a source file", () => {
+    const bundle = bundleWithFiles([
+      { path: "src/lib.rs", patch: "@@ -1,1 +1,3 @@\n fn a() {}\n+#[test]\n+fn adds() { assert_eq!(1, 1); }" },
+    ]);
+    const guarded = applyGuards(
+      claimOf({ text: "Adds a unit test", category: "tests_added" }),
+      modelSaysUnverified,
+      bundle,
+      computeSignals(bundle),
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+  });
+
+  it("is left to the model when part of the diff is not visible", () => {
+    const bundle = bundleWithFiles([
+      { path: "docs/guide.md", patch: "@@ -1,1 +1,1 @@\n-a\n+b" },
+      { path: "src/huge.ts", patch: null },
+    ]);
+    const guarded = applyGuards(
+      claimOf({ text: "Adds unit tests", category: "tests_added" }),
+      modelSaysUnverified,
+      bundle,
+      computeSignals(bundle),
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+  });
+});
+
 describe("CI-only contradictions", () => {
   it("downgrades a contradiction whose only cited check failed for infrastructure reasons", () => {
     const bundle = makeBundle({
