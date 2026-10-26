@@ -658,6 +658,61 @@ describe("signal corner: removedExports vs signatureChanges (correction 4)", () 
   });
 });
 
+describe("CI-only contradictions", () => {
+  it("downgrades a contradiction whose only cited check failed for infrastructure reasons", () => {
+    const bundle = makeBundle({
+      checkRuns: [
+        {
+          name: "Format (Biome)",
+          status: "completed",
+          conclusion: "failure",
+          htmlUrl: "https://github.com/acme/widget/runs/504",
+          failureMessage: "Unexpected HTTP response: 504",
+        },
+      ],
+    });
+    const guarded = applyGuards(
+      claimOf({ text: "Biome checks pass", category: "other" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.9,
+        reasoning: "Format (Biome) failed.",
+        evidence: [{ type: "check_run", checkRunName: "Format (Biome)" }],
+      },
+      bundle,
+      computeSignals(bundle),
+    );
+    expect(guarded.verdict).toBe("UNVERIFIED");
+    expect(guarded.reasoning).toContain("None of the cited CI checks actually failed");
+  });
+
+  it("keeps a contradiction backed by a real failure", () => {
+    const bundle = makeBundle({
+      checkRuns: [
+        {
+          name: "Format (Biome)",
+          status: "completed",
+          conclusion: "failure",
+          htmlUrl: "https://github.com/acme/widget/runs/1",
+          failureMessage: "File src/app.ts is not formatted.",
+        },
+      ],
+    });
+    const guarded = applyGuards(
+      claimOf({ text: "Biome checks pass", category: "other" }),
+      {
+        verdict: "CONTRADICTED",
+        confidence: 0.9,
+        reasoning: "Format (Biome) failed on src/app.ts.",
+        evidence: [{ type: "check_run", checkRunName: "Format (Biome)" }],
+      },
+      bundle,
+      computeSignals(bundle),
+    );
+    expect(guarded.verdict).toBe("CONTRADICTED");
+  });
+});
+
 // Keep the ClaimResult import honest: the guard's output feeds claim results.
 describe("guard output shape feeds ClaimResult", () => {
   it("produces fields a ClaimResult can absorb", () => {

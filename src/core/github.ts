@@ -20,6 +20,8 @@ export interface PrLocator {
 /** Hard caps so one huge PR can't blow up the run (docs/PLAN.md §16). */
 export const MAX_FILES = 100;
 export const MAX_COMMITS = 50;
+/** Failed check runs whose annotations are fetched to learn why they failed. */
+export const MAX_FAILURE_LOOKUPS = 6;
 
 /** Error with a user-facing message; `status` carries the GitHub status when known. */
 export class GitHubError extends Error {
@@ -152,6 +154,28 @@ export function sanitizePrBody(body: string | null): string | null {
   return text.trim();
 }
 
+/** First failure-level annotation of a check run (max 300 chars); null when absent or unreadable. */
+async function firstFailureAnnotation(
+  octokit: Octokit,
+  owner: string,
+  repo: string,
+  checkRunId: number,
+): Promise<string | null> {
+  try {
+    const response = await octokit.rest.checks.listAnnotations({
+      owner,
+      repo,
+      check_run_id: checkRunId,
+      per_page: 20,
+    });
+    const failure = response.data.find((annotation) => annotation.annotation_level === "failure");
+    const message = failure?.message?.trim();
+    return message ? message.slice(0, 300) : null;
+  } catch {
+    return null; // a missing reason must never fail the whole run
+  }
+}
+
 function createOctokit(githubToken: string | undefined): Octokit {
   return new Octokit({
     ...(githubToken ? { auth: githubToken } : {}),
@@ -247,11 +271,23 @@ export async function fetchPrBundle(
       ref: headSha,
       per_page: 100,
     });
-    checkRuns = response.data.check_runs.map((run: RawCheckRun) => ({
+    const runs = response.data.check_runs;
+    // Why did a run fail? Its first failure annotation tells real failures
+    // ("2 tests failed") apart from infrastructure ones ("HTTP 504").
+    const failed = runs
+      .filter((run) => run.conclusion === "failure" || run.conclusion === "timed_out")
+      .slice(0, MAX_FAILURE_LOOKUPS);
+    const messages = new Map<number, string | null>(
+      await Promise.all(
+        failed.map(async (run) => [run.id, await firstFailureAnnotation(octokit, owner, repo, run.id)] as const),
+      ),
+    );
+    checkRuns = runs.map((run: RawCheckRun) => ({
       name: run.name ?? "(unnamed check)",
       status: run.status ?? "completed",
       conclusion: run.conclusion ?? null,
       htmlUrl: run.html_url ?? prUrl,
+      failureMessage: messages.get(run.id) ?? null,
     }));
   } catch (error) {
     const status = isOctokitError(error) && typeof error.status === "number" ? error.status : undefined;
@@ -276,6 +312,7 @@ export async function fetchPrBundle(
         context: status.context ?? "(unknown context)",
         state: status.state ?? "pending",
         targetUrl: status.target_url ?? null,
+        description: status.description ?? null,
       })),
     };
   } catch (error) {

@@ -31,6 +31,12 @@
         "required": true
       },
       {
+        "$comment": "'Format (Biome)' failed on 'Unexpected HTTP response: 504' while setting up (it never ran Biome), and 'Lint (Biome)' passed. A Biome claim must not be CONTRADICTED by an infrastructure failure.",
+        "type": "noClaimVerdict",
+        "textIncludes": "biome",
+        "verdict": "CONTRADICTED"
+      },
+      {
         "$comment": "A tests_pass contradiction is legitimate only if it cites a test-kind check.",
         "type": "contradictedMustCiteKind",
         "claimCategory": "tests_pass",

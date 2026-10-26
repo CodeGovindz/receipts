@@ -24,8 +24,10 @@ export class ConfigError extends Error {
  * chain.
  */
 export function loadDotEnv(path = ".env"): void {
-  if (!fs.existsSync(path)) return;
-  const lines = fs.readFileSync(path, "utf8").split(/\r?\n/);
+  // turbopackIgnore: Next.js loads .env itself; without these hints the
+  // bundler traces the whole project into the serverless function.
+  if (!fs.existsSync(/*turbopackIgnore: true*/ path)) return;
+  const lines = fs.readFileSync(/*turbopackIgnore: true*/ path, "utf8").split(/\r?\n/);
   for (const line of lines) {
     const trimmed = line.trim();
     if (trimmed === "" || trimmed.startsWith("#")) continue;

@@ -155,10 +155,11 @@ export function toMarkdown(report: Report): string {
     lines.push("| Verdict | Claim | Reasoning | Evidence |");
     lines.push("|---|---|---|---|");
     for (const result of report.claims) {
-      const claimText = result.claim.quote !== "" ? result.claim.quote : result.claim.text;
+      // The self-contained claim text, not the raw quote: quotes can be
+      // fragments ("five fail before the fix.") that mean nothing out of context.
       lines.push(
         `| ${VERDICT_ICON[result.verdict]} ${result.verdict} | ` +
-          `${tableCell(claimText, 160)} | ${tableCell(result.reasoning)} | ` +
+          `${tableCell(result.claim.text, 160)} | ${tableCell(result.reasoning)} | ` +
           `${evidenceMarkdown(result.evidence) || "—"} |`,
       );
     }
