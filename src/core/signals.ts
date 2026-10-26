@@ -231,6 +231,10 @@ const ADDED_TEST_CASE_PATTERNS: RegExp[] = [
   /\bdef\s+test_[A-Za-z0-9_]+/,
   /\bfunc\s+Test[A-Za-z0-9_]+/,
   /@Test\b/,
+  /#\[(?:tokio::)?test\]/, // Rust tests usually live inside regular source files
+  /\bTEST(?:_F|_P)?\s*\(/, // GoogleTest
+  /\[(?:Fact|Theory|Test|TestMethod)\]/, // xUnit / NUnit / MSTest
+  /(?:^|\s)it\s+["']/, // RSpec
 ];
 
 const SKIP_MARKERS = [
