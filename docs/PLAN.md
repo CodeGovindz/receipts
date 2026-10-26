@@ -79,7 +79,7 @@ Overall grade: **FAIL** if any claim is CONTRADICTED; **PASS** if all are VERIFI
 | STRONG (verification) | `RECEIPTS_MODEL_STRONG` | `us.moonshotai.kimi-k3` | **Must be the cross-region inference profile ID** — the bare `moonshotai.kimi-k3` fails with on-demand throughput. Smoke test hard-fails without a `us.`/`global.` prefix |
 | FALLBACK | `RECEIPTS_MODEL_FALLBACK` | `openai.gpt-oss-120b-1:0` | Engaged automatically per §5 rules |
 
-Other env vars: `AWS_REGION=us-east-1`; `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` optional locally (SDK default credential chain) and required on Vercel; `GITHUB_TOKEN` optional locally, required in production.
+Other env vars: `AWS_REGION=us-east-1`; `RECEIPTS_AWS_ACCESS_KEY_ID`/`RECEIPTS_AWS_SECRET_ACCESS_KEY` optional locally (SDK default credential chain) and required on Vercel, prefixed because Vercel reserves the `AWS_*` names; `RECEIPTS_AWS_REGION` overrides `AWS_REGION`; `GITHUB_TOKEN` optional locally, required in production.
 
 `.env` handling: scripts load `.env` by hand (no dotenv dep), skipping empty values; empty `AWS_ACCESS_KEY_ID=` must not clobber the default chain. Next.js itself uses Vercel dashboard env in P2+.
 
