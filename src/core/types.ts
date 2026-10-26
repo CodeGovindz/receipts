@@ -85,6 +85,8 @@ export const CheckRunSchema = z.object({
   conclusion: z.string().nullable(),
   /** Link to the check run detail page (evidence URL). */
   htmlUrl: z.string(),
+  /** First failure annotation of a failed run, e.g. "Unexpected HTTP response: 504". */
+  failureMessage: z.string().nullable().optional(),
 });
 export type CheckRun = z.infer<typeof CheckRunSchema>;
 
@@ -92,6 +94,8 @@ export const StatusEntrySchema = z.object({
   context: z.string(),
   state: z.string(),
   targetUrl: z.string().nullable(),
+  /** Status description, e.g. Vercel's "Authorization required to deploy." */
+  description: z.string().nullable().optional(),
 });
 export type StatusEntry = z.infer<typeof StatusEntrySchema>;
 

@@ -87,15 +87,33 @@ export function claimCheckKindHints(text: string): CheckKind[] {
 export type CheckEffect = "success" | "failure" | "pending" | "ignored";
 
 /** Conclusion/status combinations that neither pass nor fail (Bug 3 treatment). */
-const IGNORABLE_CONCLUSIONS = new Set(["skipped", "neutral", "stale"]);
-const FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "cancelled", "startup_failure", "action_required"]);
+// "cancelled" is ignorable: runs are usually cancelled because a newer push
+// superseded them, which says nothing about the code.
+const IGNORABLE_CONCLUSIONS = new Set(["skipped", "neutral", "stale", "cancelled"]);
+const FAILURE_CONCLUSIONS = new Set(["failure", "timed_out", "startup_failure", "action_required"]);
 const PENDING_STATUSES = new Set(["queued", "in_progress"]);
 
-export function effectiveCheckEffect(status: string, conclusion: string | null): CheckEffect {
+/**
+ * Failure messages that mean the CI machinery broke, not the code: a check
+ * that died on an HTTP 504 while setting up never ran its tool, so it can
+ * neither support nor contradict a claim.
+ */
+const INFRA_FAILURE =
+  /unexpected http response: 5\d\d|\b(502|503|504) (bad gateway|service unavailable|gateway time-?out)|internal server error|runner has received a shutdown signal|lost communication with the server|ECONNRESET|ETIMEDOUT|no space left on device|authorization required|exceeded .*(minutes|quota|spending limit)|billing|rate limit/i;
+
+export function isInfraFailure(message: string | null | undefined): boolean {
+  return typeof message === "string" && INFRA_FAILURE.test(message);
+}
+
+export function effectiveCheckEffect(
+  status: string,
+  conclusion: string | null,
+  failureMessage: string | null = null,
+): CheckEffect {
   if (conclusion !== null) {
     if (IGNORABLE_CONCLUSIONS.has(conclusion)) return "ignored";
     if (conclusion === "success") return "success";
-    if (FAILURE_CONCLUSIONS.has(conclusion)) return "failure";
+    if (FAILURE_CONCLUSIONS.has(conclusion)) return isInfraFailure(failureMessage) ? "ignored" : "failure";
   }
   if (PENDING_STATUSES.has(status)) return "pending";
   if (conclusion === null && (status === "completed" || status === "")) return "ignored";
@@ -111,6 +129,10 @@ export interface CiObservation {
   htmlUrl: string;
   kind: CheckKind;
   effective: CheckEffect;
+  /** Why it failed (first failure annotation or status description), when known. */
+  failureMessage: string | null;
+  /** Failed for infrastructure reasons, so treated as "ignored". */
+  infraFailure: boolean;
 }
 
 export interface CiSignal {
@@ -459,15 +481,27 @@ function computeDependencyChanges(bundle: PrBundle): DependencyChange[] {
  * covers both "no CI at all" and "nothing actually executed".
  */
 export function computeCiSignal(bundle: PrBundle): CiSignal {
-  const observations: CiObservation[] = bundle.checkRuns.map((run) => ({
-    name: run.name,
-    status: run.status,
-    conclusion: run.conclusion ?? null,
-    htmlUrl: run.htmlUrl,
-    kind: classifyCheckName(run.name),
-    effective: effectiveCheckEffect(run.status, run.conclusion ?? null),
-  }));
+  const observations: CiObservation[] = bundle.checkRuns.map((run) => {
+    const failureMessage = run.failureMessage ?? null;
+    const failed = run.conclusion !== null && FAILURE_CONCLUSIONS.has(run.conclusion ?? "");
+    return {
+      name: run.name,
+      status: run.status,
+      conclusion: run.conclusion ?? null,
+      htmlUrl: run.htmlUrl,
+      kind: classifyCheckName(run.name),
+      effective: effectiveCheckEffect(run.status, run.conclusion ?? null, failureMessage),
+      failureMessage,
+      infraFailure: failed && isInfraFailure(failureMessage),
+    };
+  });
   for (const status of bundle.combinedStatus?.statuses ?? []) {
+    const description = status.description ?? null;
+    const failed = status.state === "failure" || status.state === "error";
+    // Vercel reports failed GitHub authorization as a failed status whose
+    // target URL is the authorize page.
+    const infraFailure =
+      failed && (isInfraFailure(description) || /\/git\/authorize\b/.test(status.targetUrl ?? ""));
     observations.push({
       name: status.context,
       // Legacy statuses have no separate status/conclusion pair; classify
@@ -476,7 +510,9 @@ export function computeCiSignal(bundle: PrBundle): CiSignal {
       conclusion: status.state,
       htmlUrl: status.targetUrl ?? bundle.prUrl,
       kind: classifyCheckName(status.context),
-      effective: legacyStateEffect(status.state),
+      effective: infraFailure ? "ignored" : legacyStateEffect(status.state),
+      failureMessage: failed ? description : null,
+      infraFailure,
     });
   }
 
@@ -598,6 +634,14 @@ export function buildSignalsSummary(signals: Signals): string[] {
       lines.push(`CI passing (${succeeded} check run(s) succeeded)`);
       break;
     }
+  }
+  const infra = ci.checkRuns.filter((run) => run.infraFailure);
+  if (infra.length > 0) {
+    const listed = infra
+      .slice(0, MAX_LIST)
+      .map((run) => (run.failureMessage ? `${run.name} (“${run.failureMessage}”)` : run.name))
+      .join(", ");
+    lines.push(`Ignored ${infra.length} check(s) that failed for infrastructure reasons, not code: ${listed}`);
   }
   const testKindOutcome = ciKindOutcome(ci, "test");
   if (testKindOutcome === "none" && !ci.none) {

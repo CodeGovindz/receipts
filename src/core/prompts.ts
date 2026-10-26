@@ -23,14 +23,14 @@ const EXTRACTION_RULES = [
   "Each claim `text` must be a complete, self-contained sentence understandable without the PR — never a fragment. Expand shorthand: not \"five fail before the fix.\" but \"Five of the six new tests fail without the fix.\"",
   "`quote` must be an exact verbatim substring of the source sentence that supports the claim; `source` is one of `title | pr_body | commit`; `category` is one of `tests_added | tests_pass | bug_fixed | feature_added | no_breaking_change | refactor_only | docs_updated | dependency_change | performance | security | other`.",
   "`scope` is one of `ci` (a statement about CI results or the PR's observable state), `local` (a statement about runs performed on the author's machine, e.g. \"all tests pass locally\", \"I ran ctest\"), `unspecified` (everything else).",
-  "Ignore plans, intentions, TODOs, questions, quoted text, PR-template boilerplate, and unfilled checkbox sections — they make no claim about this PR. A filled-in answer inside a template section IS a claim if it states a checkable fact.",
+  "Ignore plans, intentions, TODOs, questions, quoted text, PR-template boilerplate, and unticked checkboxes — they make no claim about this PR. A filled-in answer inside a template section, or a TICKED checkbox, IS a claim if it states a checkable fact (\"[x] I have added tests\").",
   "Dedupe near-identical claims. Maximum 12 claims, most important first.",
 ].join("\n");
 
 const EXTRACTION_EXAMPLES = [
   "Examples:",
-  "1. The body says: \"Under load, the SDK stays in its recording phase and keeps the camera active. This PR fixes that.\" The first sentence is the pre-existing bug — do NOT extract it. Emit ONE claim: {\"text\":\"After this PR, an encoder error no longer leaves the SDK stuck in its recording phase\",\"quote\":\"This PR fixes that.\",\"source\":\"pr_body\",\"category\":\"bug_fixed\",\"scope\":\"unspecified\"}.",
-  "2. The body says: \"## Checklist\\n- [x] I have read the CONTRIBUTING document\\n- [ ] I have added tests\" — both are template boilerplate, extract nothing. But a filled section \"## Testing done\\nAll 141 tests pass locally.\" IS a claim: {\"text\":\"All 141 tests pass locally\",\"quote\":\"All 141 tests pass locally.\",\"source\":\"pr_body\",\"category\":\"tests_pass\",\"scope\":\"local\"}.",
+  "1. The body says: \"Under load, the SDK stays in its recording phase and keeps the camera active. This PR fixes that.\" The first sentence is the pre-existing bug — do NOT extract it. Emit ONE claim: {\"text\":\"Under load, the SDK no longer gets stuck in its recording phase with the camera active\",\"quote\":\"This PR fixes that.\",\"source\":\"pr_body\",\"category\":\"bug_fixed\",\"scope\":\"unspecified\"}. Write claim text as a plain statement of fact; never start it with \"After this PR\".",
+  "2. The body says: \"## Checklist\\n- [x] I have read the CONTRIBUTING document\\n- [ ] I have updated the docs\\n- [x] I have added tests that prove my fix is effective\". Unticked boxes claim nothing, and \"read the CONTRIBUTING document\" can't be checked, so skip both. The TICKED, checkable box IS a claim: {\"text\":\"The PR adds tests that prove the fix works\",\"quote\":\"I have added tests that prove my fix is effective\",\"source\":\"pr_body\",\"category\":\"tests_added\",\"scope\":\"unspecified\"}. A filled section \"## Testing done\\nAll 141 tests pass locally.\" is also a claim: {\"text\":\"All 141 tests pass on the author's machine\",\"quote\":\"All 141 tests pass locally.\",\"source\":\"pr_body\",\"category\":\"tests_pass\",\"scope\":\"local\"}.",
 ].join("\n");
 
 /**
@@ -86,6 +86,11 @@ const CATEGORY_RULES =
   "if removedExports shows a public API removal. `bug_fixed` / `feature_added`: VERIFIED " +
   "requires a cited hunk that plausibly implements the fix/feature; the reasoning must " +
   "state whether a test covers it.\n" +
+  "CI rules: only a check with `effective: \"failure\"` counts as failed. A check with " +
+  "`effective: \"ignored\"` produced no result (skipped, cancelled, or it failed for " +
+  "infrastructure reasons — see its failureMessage, e.g. an HTTP 504 during setup) and can " +
+  "never support or contradict a claim. A claim that a check passed locally (\"scoped Biome " +
+  "checks pass\") is not contradicted by a CI check that ran something broader.\n" +
   "Scope rules: claims with `scope: \"local\"` describe runs on the author's machine — " +
   "they cannot be confirmed by CI, so they are UNVERIFIED unless the diff itself proves " +
   "the claim. If a claim describes how the code behaved BEFORE this PR (rather than the " +
@@ -93,8 +98,11 @@ const CATEGORY_RULES =
 
 const RESPONSE_SHAPE =
   'Return `{"verdict":"VERIFIED|CONTRADICTED|UNVERIFIED","confidence":0-1,' +
-  '"reasoning":"≤2 sentences","evidence":[{"type":"file|check_run|signal","path":"...",' +
-  '"line":123,"checkRunName":"...","detail":"..."}]}`.';
+  '"reasoning":"1-2 short sentences","evidence":[{"type":"file|check_run|signal","path":"...",' +
+  '"line":123,"checkRunName":"...","detail":"..."}]}`.\n' +
+  "The reasoning is read by a human code reviewer: at most 2 short sentences (under 50 words) " +
+  "in plain English. Name files and CI checks, but never mention internal field names such " +
+  "as effective, kind, scope, category or signal keys.";
 
 /** The signal keys relevant to each claim category (always includes CI state). */
 function relevantSignalKeys(category: Claim["category"]): SignalKey[] {
@@ -139,6 +147,7 @@ function ciForPrompt(ci: Signals["ci"]): string {
       status: run.status,
       conclusion: run.conclusion,
       effective: run.effective,
+      ...(run.failureMessage ? { failureMessage: run.failureMessage } : {}),
       url: run.htmlUrl,
     })),
   );

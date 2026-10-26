@@ -1,26 +1,69 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  color-scheme: dark;
+  --background: #0c0c0d;
+  --foreground: #ececec;
+  --muted: #9a9a9f;
+  --line: #26262a;
+  --panel: #141416;
+  --paper: #f5f2ea;
+  --ink: #1d1b18;
+  --ink-muted: #6d675d;
+  --paper-line: #d9d3c5;
+  --ok: #15803d;
+  --bad: #c2261d;
+  --warn: #b45309;
+  --accent: #f2c14e;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-panel: var(--panel);
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-paper-line: var(--paper-line);
+  --color-ok: var(--ok);
+  --color-bad: var(--bad);
+  --color-warn: var(--warn);
+  --color-accent: var(--accent);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), system-ui, sans-serif;
+}
+
+/* Torn-paper bottom edge for the receipt card. */
+.receipt-edge {
+  --tooth: 10px;
+  mask:
+    conic-gradient(from -45deg at bottom, #0000, #000 1deg 89deg, #0000 90deg) 50% / calc(var(--tooth) * 2) 100%;
+  padding-bottom: calc(var(--tooth) + 1.5rem);
+}
+
+@keyframes receipt-print {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+
+.receipt-print {
+  animation: receipt-print 700ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .receipt-print {
+    animation: none;
+  }
 }

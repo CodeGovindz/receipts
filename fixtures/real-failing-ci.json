@@ -66,175 +66,204 @@
       "name": "Rust tests (Linux)",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574971"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574971",
+      "failureMessage": null
     },
     {
       "name": "GPUI patch tests (${{ matrix.settings.name }})",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574389"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574389",
+      "failureMessage": null
     },
     {
       "name": "Verify Tauri plugin versions",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574201"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753574201",
+      "failureMessage": null
     },
     {
       "name": "Clippy",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753573877"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753573877",
+      "failureMessage": null
     },
     {
       "name": "Build GPUI Desktop",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753573825"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121753573825",
+      "failureMessage": null
     },
     {
       "name": "matrix.platform",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752900251"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752900251",
+      "failureMessage": null
     },
     {
       "name": "Deep review label",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752899954"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752899954",
+      "failureMessage": null
     },
     {
       "name": "Engine verify",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752897420"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752897420",
+      "failureMessage": null
     },
     {
       "name": "Perf budget",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752729176"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752729176",
+      "failureMessage": null
     },
     {
       "name": "measure",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752715981"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752715981",
+      "failureMessage": null
     },
     {
       "name": "Socket Security: Pull Request Alerts",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752164629"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752164629",
+      "failureMessage": null
     },
     {
       "name": "real-capture",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752163261"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752163261",
+      "failureMessage": null
     },
     {
       "name": "real-capture (windows-2022)",
       "status": "completed",
       "conclusion": "skipped",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752163083"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752163083",
+      "failureMessage": null
     },
     {
       "name": "Verify recording",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752161138"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752161138",
+      "failureMessage": null
     },
     {
       "name": "Vercel Agent Review",
       "status": "completed",
       "conclusion": "neutral",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752116939"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752116939",
+      "failureMessage": null
     },
     {
       "name": "Superagent Security Scan",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752093068"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752093068",
+      "failureMessage": null
     },
     {
       "name": "Contributor trust",
       "status": "completed",
       "conclusion": "neutral",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752086725"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752086725",
+      "failureMessage": null
     },
     {
       "name": "Socket Security: Project Report",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752040618"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752040618",
+      "failureMessage": null
     },
     {
       "name": "Vercel Preview Comments",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752040311"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752040311",
+      "failureMessage": null
     },
     {
       "name": "Greptile Review",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752028683"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/runs/121752028683",
+      "failureMessage": null
     },
     {
       "name": "Plan",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752017555"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374015733/job/121752017555",
+      "failureMessage": null
     },
     {
       "name": "Typecheck",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752017000"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752017000",
+      "failureMessage": null
     },
     {
       "name": "Format (Cargo)",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016774"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016774",
+      "failureMessage": null
     },
     {
       "name": "Detect Changes",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016655"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016655",
+      "failureMessage": null
     },
     {
       "name": "Lint (Biome)",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016636"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016636",
+      "failureMessage": null
     },
     {
       "name": "Format (Biome)",
       "status": "completed",
       "conclusion": "failure",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016536"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016536",
+      "failureMessage": "Unexpected HTTP response: 504"
     },
     {
       "name": "Mobile",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016219"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014764/job/121752016219",
+      "failureMessage": null
     },
     {
       "name": "Scope",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752012623"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014928/job/121752012623",
+      "failureMessage": null
     },
     {
       "name": "scope",
       "status": "completed",
       "conclusion": "success",
-      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752012479"
+      "htmlUrl": "https://github.com/CapSoftware/Cap/actions/runs/40374014999/job/121752012479",
+      "failureMessage": null
     }
   ],
   "combinedStatus": {
@@ -243,16 +272,18 @@
       {
         "context": "Vercel – cap-status",
         "state": "success",
-        "targetUrl": "https://vercel.com/mc-ilroy/cap-status/7JEpFXmFbEWxyxt7bPaZK6VaxZFD"
+        "targetUrl": "https://vercel.com/mc-ilroy/cap-status/7JEpFXmFbEWxyxt7bPaZK6VaxZFD",
+        "description": "Skipped - Not affected"
       },
       {
         "context": "Vercel – cap-web",
         "state": "failure",
-        "targetUrl": "https://vercel.com/git/authorize?team=Cap%20Software%20Inc&slug=mc-ilroy&teamId=team_vbZRU7UW78rpKKIj4c9PfFAC&type=github&job=%7B%22headInfo%22%3A%7B%22sha%22%3A%2292cc9220a77f97d784a6a711facda0ee8c53e3e4%22%7D%2C%22id%22%3A%22QmYD5yvL6jWwdRGE7p9Wa6hhuKz4FvTWPPRBebrgkY5UtK%22%2C%22org%22%3A%22CapSoftware%22%2C%22prId%22%3A3412%2C%22repo%22%3A%22Cap%22%7D"
+        "targetUrl": "https://vercel.com/git/authorize?team=Cap%20Software%20Inc&slug=mc-ilroy&teamId=team_vbZRU7UW78rpKKIj4c9PfFAC&type=github&job=%7B%22headInfo%22%3A%7B%22sha%22%3A%2292cc9220a77f97d784a6a711facda0ee8c53e3e4%22%7D%2C%22id%22%3A%22QmYD5yvL6jWwdRGE7p9Wa6hhuKz4FvTWPPRBebrgkY5UtK%22%2C%22org%22%3A%22CapSoftware%22%2C%22prId%22%3A3412%2C%22repo%22%3A%22Cap%22%7D",
+        "description": "Authorization required to deploy."
       }
     ]
   },
-  "fetchedAt": "2026-10-26T18:30:46.321Z",
+  "fetchedAt": "2026-10-26T19:08:19.974Z",
   "filesTruncated": false,
   "commitsTruncated": false
 }

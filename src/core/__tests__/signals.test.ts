@@ -4,13 +4,15 @@ import {
   ciKindOutcome,
   classifyCheckName,
   computeCiSignal,
+  computeSignals,
   effectiveCheckEffect,
+  isInfraFailure,
 } from "../signals";
 import type { PrBundle } from "../types";
 
 function bundleWith(
-  checkRuns: Array<{ name: string; conclusion: string | null; status?: string }>,
-  statuses: Array<{ context: string; state: string }> = [],
+  checkRuns: Array<{ name: string; conclusion: string | null; status?: string; failureMessage?: string }>,
+  statuses: Array<{ context: string; state: string; targetUrl?: string; description?: string }> = [],
 ): PrBundle {
   return {
     prUrl: "https://github.com/acme/widget/pull/1",
@@ -28,6 +30,7 @@ function bundleWith(
       status: run.status ?? "completed",
       conclusion: run.conclusion,
       htmlUrl: "https://example.com/ci/1",
+      failureMessage: run.failureMessage ?? null,
     })),
     combinedStatus:
       statuses.length > 0
@@ -36,7 +39,8 @@ function bundleWith(
             statuses: statuses.map((status) => ({
               context: status.context,
               state: status.state,
-              targetUrl: null,
+              targetUrl: status.targetUrl ?? null,
+              description: status.description ?? null,
             })),
           }
         : null,
@@ -78,6 +82,7 @@ describe("effectiveCheckEffect (Bug 3: skipped/neutral/stale are ignorable)", ()
     ["completed", "skipped", "ignored"],
     ["completed", "neutral", "ignored"],
     ["completed", "stale", "ignored"],
+    ["completed", "cancelled", "ignored"], // usually superseded by a newer push
     ["queued", null, "pending"],
     ["in_progress", null, "pending"],
     ["completed", null, "ignored"],
@@ -189,5 +194,57 @@ describe("computeCiSignal", () => {
     expect(ciLine).toBeDefined();
     expect(ciLine ?? "").toContain("Format (Biome) [lint]");
     expect(ciLine ?? "").toContain("Vercel – cap-web [deploy]");
+  });
+});
+
+describe("infrastructure failures are not code failures", () => {
+  it.each([
+    ["Unexpected HTTP response: 504", true],
+    ["The runner has received a shutdown signal.", true],
+    ["Authorization required to deploy.", true],
+    ["Process completed with exit code 1.", false],
+    ["2 tests failed in login.test.ts", false],
+  ])("isInfraFailure(%s) -> %s", (message, expected) => {
+    expect(isInfraFailure(message)).toBe(expected);
+  });
+
+  it("ignores a check that failed on an HTTP 504 (the real Cap#3412 'Format (Biome)' run)", () => {
+    const ci = computeCiSignal(
+      bundleWith([
+        { name: "Format (Biome)", conclusion: "failure", failureMessage: "Unexpected HTTP response: 504" },
+        { name: "Lint (Biome)", conclusion: "success" },
+      ]),
+    );
+    const format = ci.checkRuns.find((run) => run.name === "Format (Biome)");
+    expect(format?.effective).toBe("ignored");
+    expect(format?.infraFailure).toBe(true);
+    expect(ci.outcome).toBe("success");
+    const summary = buildSignalsSummary(
+      computeSignals(
+        bundleWith([
+          { name: "Format (Biome)", conclusion: "failure", failureMessage: "Unexpected HTTP response: 504" },
+        ]),
+      ),
+    );
+    expect(summary.join("\n")).toContain("infrastructure reasons");
+  });
+
+  it("keeps a real failure as a failure", () => {
+    const ci = computeCiSignal(
+      bundleWith([{ name: "Unit tests", conclusion: "failure", failureMessage: "Process completed with exit code 1." }]),
+    );
+    expect(ci.checkRuns[0].effective).toBe("failure");
+    expect(ci.outcome).toBe("failure");
+  });
+
+  it("ignores a Vercel status that failed on GitHub authorization", () => {
+    const ci = computeCiSignal(
+      bundleWith(
+        [{ name: "Unit tests", conclusion: "success" }],
+        [{ context: "Vercel – cap-web", state: "failure", targetUrl: "https://vercel.com/git/authorize?team=x" }],
+      ),
+    );
+    expect(ci.checkRuns.find((run) => run.name === "Vercel – cap-web")?.effective).toBe("ignored");
+    expect(ci.outcome).toBe("success");
   });
 });

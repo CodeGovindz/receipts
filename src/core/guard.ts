@@ -150,6 +150,21 @@ export function applyGuards(
     reasoning = "Model gave no checkable evidence.";
   }
 
+  // A contradiction that rests only on CI checks must cite a check that
+  // really failed: skipped, cancelled and infrastructure-failed checks
+  // (effective "ignored") say nothing about the code.
+  if (
+    verdict === "CONTRADICTED" &&
+    kept.every((item) => item.type === "check_run") &&
+    !kept.some(
+      (item) =>
+        signals.ci.checkRuns.find((run) => run.name === item.checkRunName)?.effective === "failure",
+    )
+  ) {
+    verdict = "UNVERIFIED";
+    reasoning = `None of the cited CI checks actually failed (they were skipped, cancelled or broke for infrastructure reasons). ${reasoning}`;
+  }
+
   // Bug 2 (deterministic backstop) — a tests_pass verdict must match the CI
   // evidence by kind, regardless of what the model decided this run:
   //   VERIFIED only while every kind the claim talks about succeeded;
