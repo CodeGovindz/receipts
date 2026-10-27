@@ -48,6 +48,9 @@ export function ReceiptsApp() {
   const run = useCallback(async (prUrl: string, fresh = false) => {
     const url = prUrl.trim();
     if (url === "") return;
+    // Next.js syncs history.replaceState below into useSearchParams; without
+    // this the ?pr= auto-run effect would start the same check a second time.
+    autoRan.current = true;
     setInput(url);
     setStatus("running");
     setEvents([]);
