@@ -658,6 +658,25 @@ describe("signal corner: removedExports vs signatureChanges (correction 4)", () 
   });
 });
 
+describe("quote guard with shortened quotes", () => {
+  const bundle = makeBundle({
+    body: "Handle errors only for the current encoder, release capture and timers before notifying listeners, and transition to `error` once.",
+  });
+  const withQuote = (quote: string) => claimOf({ text: "t", quote });
+
+  it("accepts a quote shortened with ... at either end or in the middle", () => {
+    expect(quoteMatchesSource(withQuote("Handle errors only for the current encoder..."), bundle)).toBe(true);
+    expect(quoteMatchesSource(withQuote("...release capture and timers before notifying listeners..."), bundle)).toBe(true);
+    expect(quoteMatchesSource(withQuote("Handle errors only … transition to `error` once."), bundle)).toBe(true);
+  });
+
+  it("still rejects invented text, out-of-order fragments, and quotes that are only dots", () => {
+    expect(quoteMatchesSource(withQuote("Handle errors... and adds unit tests"), bundle)).toBe(false);
+    expect(quoteMatchesSource(withQuote("transition to `error` once ... Handle errors"), bundle)).toBe(false);
+    expect(quoteMatchesSource(withQuote("..."), bundle)).toBe(false);
+  });
+});
+
 describe("tests_added with no tests anywhere in the diff", () => {
   const modelSaysUnverified = {
     verdict: "UNVERIFIED" as const,

@@ -15,6 +15,8 @@ import { ExtractionResponseSchema } from "./types";
 
 export const MAX_CLAIMS = 12;
 export const FAST_TIMEOUT_MS = 45_000;
+/** A quote shorter than this (after removing "..." gaps) can't anchor a claim. */
+const MIN_QUOTE_CHARS = 8;
 
 export interface ExtractionResult {
   claims: Claim[];
@@ -52,11 +54,24 @@ function sourceTextsFor(bundle: PrBundle, source: Claim["source"]): string[] {
  * case-insensitive) is a substring of the text of its declared source.
  */
 export function quoteMatchesSource(claim: Claim, bundle: PrBundle): boolean {
-  const quote = normalizeText(claim.quote);
-  if (quote === "") return false;
-  return sourceTextsFor(bundle, claim.source).some(
-    (sourceText) => normalizeText(sourceText).includes(quote),
-  );
+  // Models shorten long quotes with "..." / "…": treat each as a gap. Every
+  // remaining fragment must still appear in the source, in order, so an
+  // invented quote can't pass by being chopped up.
+  const fragments = claim.quote
+    .split(/\.{3}|…/)
+    .map(normalizeText)
+    .filter((fragment) => fragment !== "");
+  if (fragments.length === 0 || fragments.join("").length < MIN_QUOTE_CHARS) return false;
+  return sourceTextsFor(bundle, claim.source).some((sourceText) => {
+    const source = normalizeText(sourceText);
+    let from = 0;
+    for (const fragment of fragments) {
+      const at = source.indexOf(fragment, from);
+      if (at < 0) return false;
+      from = at + fragment.length;
+    }
+    return true;
+  });
 }
 
 /**
@@ -77,7 +92,9 @@ export async function extractClaims(
         modelId: options.fastModelId,
         system: EXTRACTION_SYSTEM_PROMPT,
         user: prompt,
-        maxTokens: 1000,
+        // 12 claims with text + quote can pass 1000 tokens; truncated JSON
+        // costs a full retry.
+        maxTokens: 3000,
         temperature: 0,
         timeoutMs: FAST_TIMEOUT_MS,
       },
